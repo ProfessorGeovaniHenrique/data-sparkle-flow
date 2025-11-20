@@ -2,9 +2,10 @@ import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
-import { parseExcelFile, ParseResult } from '@/lib/excelParser';
+import { parseExcelFile, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult } from '@/lib/excelParser';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import ColumnMapper, { ColumnMap } from '@/components/ColumnMapper';
 
 interface FileUploadProps {
   onFilesSelect: (files: File[], parsedData: ParseResult[]) => void;
@@ -15,6 +16,8 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
   const [isParsing, setIsParsing] = useState(false);
   const [parseResults, setParseResults] = useState<ParseResult[]>([]);
   const [rawFiles, setRawFiles] = useState<File[]>([]);
+  const [needsMapping, setNeedsMapping] = useState(false);
+  const [rawParseData, setRawParseData] = useState<RawParseResult | null>(null);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -29,8 +32,21 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
         try {
           toast.info(`Lendo arquivo: ${file.name}...`);
           const result = await parseExcelFile(file);
-          results.push(result);
-          toast.success(`${file.name}: ${result.totalRows} músicas encontradas.`);
+          
+          // Verifica confiança da detecção
+          if (result.detectionConfidence === 'low') {
+            // Baixa confiança: pede mapeamento manual
+            toast.warning("Não foi possível identificar as colunas automaticamente. Por favor, mapeie-as manualmente.");
+            const rawData = await parseExcelRaw(file);
+            setRawParseData(rawData);
+            setNeedsMapping(true);
+            setIsParsing(false);
+            return; // Para aqui e mostra o mapper
+          } else {
+            // Alta confiança: prossegue normalmente
+            results.push(result);
+            toast.success(`${file.name}: ${result.totalRows} músicas encontradas.`);
+          }
         } catch (error: any) {
           console.error(`Erro ao ler ${file.name}:`, error);
           toast.error(`Falha ao ler ${file.name}: ${error.message}`);
@@ -41,11 +57,11 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
       setIsParsing(false);
       if (!hasError && results.length > 0) {
         setParseResults(results);
-      } else {
+      } else if (!needsMapping) {
         setRawFiles([]);
       }
     }
-  }, []);
+  }, [needsMapping]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -66,8 +82,44 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
   const handleCancel = () => {
     setParseResults([]);
     setRawFiles([]);
+    setNeedsMapping(false);
+    setRawParseData(null);
     toast.info("Seleção de arquivos cancelada.");
   };
+
+  const handleMappingConfirm = async (map: ColumnMap) => {
+    if (!rawParseData || rawFiles.length === 0) return;
+    
+    try {
+      toast.info("Aplicando mapeamento...");
+      const result = await extractDataFromMap(rawFiles[0], map);
+      setParseResults([result]);
+      setNeedsMapping(false);
+      setRawParseData(null);
+      toast.success(`${result.totalRows} músicas extraídas com sucesso!`);
+    } catch (error: any) {
+      toast.error(`Erro ao processar: ${error.message}`);
+    }
+  };
+
+  const handleMappingCancel = () => {
+    setNeedsMapping(false);
+    setRawParseData(null);
+    setRawFiles([]);
+    toast.info("Mapeamento cancelado.");
+  };
+
+  // Se precisa de mapeamento, mostra o ColumnMapper
+  if (needsMapping && rawParseData) {
+    return (
+      <ColumnMapper
+        filename={rawParseData.filename}
+        rawRows={rawParseData.rawRows}
+        onConfirm={handleMappingConfirm}
+        onCancel={handleMappingCancel}
+      />
+    );
+  }
 
   if (parseResults.length > 0) {
     const totalMusicas = parseResults.reduce((acc, curr) => acc + curr.totalRows, 0);
