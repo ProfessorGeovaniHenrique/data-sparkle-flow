@@ -5,8 +5,19 @@ import { FileUpload } from '@/components/FileUpload';
 import { ProcessingControl } from '@/components/ProcessingControl';
 import EnrichedDataTable from '@/components/EnrichedDataTable';
 import { ErrorLog } from '@/components/ErrorLog';
-import { Download, Music } from 'lucide-react';
+import { Download, Music, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { ParseResult, ParsedMusic } from '@/lib/excelParser';
 import { BatchProcessor, EnrichedMusicData } from '@/lib/batchProcessor';
 import { ProcessingProvider, useProcessing } from '@/contexts/ProcessingContext';
@@ -137,9 +148,31 @@ const IndexContent = () => {
                   <Download className="w-5 h-5" /> Exportar CSV ({enrichedData.length})
                 </Button>
                 {!isProcessing && (
-                  <Button onClick={handleNewProcessing} variant="outline" className="gap-2">
-                    Novo Processamento
-                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" className="gap-2">
+                        <RotateCcw className="w-4 h-4" />
+                        Novo Processamento
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Deseja começar do zero?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Esta ação irá apagar todo o progresso atual ({enrichedData.length} músicas processadas).
+                          Se você não exportou os dados, eles serão perdidos.
+                          <br/><br/>
+                          <strong>Esta ação não pode ser desfeita.</strong>
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleNewProcessing} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Sim, apagar tudo
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 )}
               </>
             )}
