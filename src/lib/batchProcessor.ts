@@ -19,7 +19,7 @@ export class BatchProcessor {
   private processBatch: ProcessBatchFn;
   private context: ProcessingContextType;
   private currentIndex: number = 0;
-  private allResults: EnrichedMusicData[] = [];
+  private results: EnrichedMusicData[] = [];
   private isRunning: boolean = false;
 
   constructor(
@@ -38,44 +38,34 @@ export class BatchProcessor {
     if (this.isRunning) return;
     
     this.isRunning = true;
-    this.context.setStatus('processing');
-    this.allResults = [];
+    this.context.setStatus('enriching');
+    this.results = [];
     this.currentIndex = 0;
 
     const totalBatches = Math.ceil(this.items.length / this.batchSize);
 
     try {
+      const startTime = Date.now();
+      let lastUpdateTime = startTime;
+      let lastUpdateIndex = 0;
+
       while (this.currentIndex < this.items.length) {
-        // Verifica se está pausado
+        // Aguarda enquanto pausado
         while (this.context.status === 'paused') {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        // Para se o status voltar para idle (cancelamento)
+        // Para se cancelado (status volta para idle)
         if (this.context.status === 'idle') break;
 
         const currentBatch = Math.floor(this.currentIndex / this.batchSize);
         const batch = this.items.slice(this.currentIndex, this.currentIndex + this.batchSize);
 
         try {
-          const startTime = Date.now();
           const batchResults = await this.processBatch(batch);
-          const elapsed = Date.now() - startTime;
-
-          this.allResults.push(...batchResults);
-          this.currentIndex += batch.length;
-
-          const itemsPerSecond = batch.length / (elapsed / 1000);
-          const remainingItems = this.items.length - this.currentIndex;
-          const estimatedSeconds = remainingItems / itemsPerSecond;
-
-          this.context.setProgress({
-            current: this.currentIndex,
-            total: this.items.length,
-            percentage: Math.round((this.currentIndex / this.items.length) * 100),
-            itemsPerSecond: Math.round(itemsPerSecond * 10) / 10,
-            estimatedTimeRemaining: Math.round(estimatedSeconds)
-          });
+          this.results.push(...batchResults);
+          
+          this.context.setResults([...this.results]);
 
         } catch (error) {
           this.context.addError({
@@ -86,7 +76,7 @@ export class BatchProcessor {
           });
 
           batch.forEach(music => {
-            this.allResults.push({
+            this.results.push({
               id: music.id,
               titulo_original: music.titulo,
               artista_encontrado: 'Não Identificado',
@@ -96,8 +86,33 @@ export class BatchProcessor {
               status_pesquisa: 'Falha'
             });
           });
+        }
 
-          this.currentIndex += batch.length;
+        this.currentIndex += batch.length;
+        
+        const now = Date.now();
+        const elapsedSinceLastUpdate = (now - lastUpdateTime) / 1000;
+        
+        if (elapsedSinceLastUpdate >= 1) {
+          const itemsProcessedSinceLastUpdate = this.currentIndex - lastUpdateIndex;
+          const speed = itemsProcessedSinceLastUpdate / elapsedSinceLastUpdate;
+          const itemsRemaining = this.items.length - this.currentIndex;
+          const eta = speed > 0 ? itemsRemaining / speed : 0;
+          
+          this.context.setProgress({
+            current: this.currentIndex,
+            total: this.items.length,
+            speed,
+            eta,
+          });
+          
+          lastUpdateTime = now;
+          lastUpdateIndex = this.currentIndex;
+        } else {
+          this.context.setProgress({
+            current: this.currentIndex,
+            total: this.items.length,
+          });
         }
       }
 
@@ -118,18 +133,18 @@ export class BatchProcessor {
       this.isRunning = false;
     }
 
-    return this.allResults;
+    return this.results;
   }
 
   getResults(): EnrichedMusicData[] {
-    return this.allResults;
+    return this.results;
   }
 
   getCurrentProgress() {
     return {
       processed: this.currentIndex,
       total: this.items.length,
-      results: this.allResults
+      results: this.results
     };
   }
 }

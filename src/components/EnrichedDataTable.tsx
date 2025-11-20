@@ -1,24 +1,37 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { EnrichedMusicData } from '../lib/batchProcessor';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
-import { Search, ChevronLeft, ChevronRight, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, CheckCircle2, XCircle, AlertCircle, Edit2, Check, X as XIcon } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
+import { useProcessing } from '@/contexts/ProcessingContext';
+import { toast } from 'sonner';
 
 interface EnrichedDataTableProps {
   data: EnrichedMusicData[];
   isLoading?: boolean;
 }
 
+type EditableField = 'artista_encontrado' | 'compositor_encontrado' | 'ano_lancamento';
+
+interface EditingCell {
+  rowId: string;
+  field: EditableField;
+}
+
 const ITEMS_PER_PAGE = 50;
 
 const EnrichedDataTable = ({ data, isLoading = false }: EnrichedDataTableProps) => {
+  const { updateResultItem } = useProcessing();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<'all' | 'success' | 'failure'>('all');
+  const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Filtragem e busca
   const filteredData = useMemo(() => {
@@ -59,9 +72,66 @@ const EnrichedDataTable = ({ data, isLoading = false }: EnrichedDataTableProps) 
   }, [data]);
 
   // Reset para primeira página quando filtros mudam
-  React.useEffect(() => {
+  useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter]);
+
+  // Focar input quando entra em modo de edição
+  useEffect(() => {
+    if (editingCell && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingCell]);
+
+  const startEditing = (rowId: string, field: EditableField, currentValue: string) => {
+    setEditingCell({ rowId, field });
+    setEditValue(currentValue);
+  };
+
+  const cancelEditing = () => {
+    setEditingCell(null);
+    setEditValue('');
+  };
+
+  const saveEdit = () => {
+    if (!editingCell) return;
+
+    const { rowId, field } = editingCell;
+    const trimmedValue = editValue.trim();
+
+    // Validação específica por campo
+    if (field === 'ano_lancamento') {
+      const yearMatch = trimmedValue.match(/^\d{4}$/);
+      if (!yearMatch) {
+        toast.error('Ano inválido. Use o formato YYYY (ex: 2020).');
+        return;
+      }
+      const year = parseInt(trimmedValue, 10);
+      const currentYear = new Date().getFullYear();
+      if (year < 1900 || year > currentYear + 1) {
+        toast.error(`Ano deve estar entre 1900 e ${currentYear + 1}.`);
+        return;
+      }
+    }
+
+    if (!trimmedValue) {
+      toast.error('O valor não pode estar vazio.');
+      return;
+    }
+
+    // Atualiza via contexto
+    updateResultItem(rowId, { [field]: trimmedValue });
+    cancelEditing();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      saveEdit();
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     if (status === 'Sucesso') {
@@ -163,18 +233,110 @@ const EnrichedDataTable = ({ data, isLoading = false }: EnrichedDataTableProps) 
                   </TableCell>
                 </TableRow>
               ) : (
-                paginatedData.map((item, index) => (
-                  <TableRow key={item.id || index}>
-                    <TableCell className="font-medium">{item.titulo_original}</TableCell>
-                    <TableCell>{item.artista_encontrado}</TableCell>
-                    <TableCell>{item.compositor_encontrado}</TableCell>
-                    <TableCell>{item.ano_lancamento === '0000' ? '-' : item.ano_lancamento}</TableCell>
-                    <TableCell>{getStatusBadge(item.status_pesquisa)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground truncate max-w-[200px]">
-                      {item.observacoes || '-'}
-                    </TableCell>
-                  </TableRow>
-                ))
+                paginatedData.map((item, index) => {
+                  const rowId = item.id || `row-${index}`;
+                  return (
+                    <TableRow key={rowId}>
+                      <TableCell className="font-medium">{item.titulo_original}</TableCell>
+                      
+                      {/* Artista - Editável */}
+                      <TableCell>
+                        {editingCell?.rowId === rowId && editingCell?.field === 'artista_encontrado' ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              ref={inputRef}
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={saveEdit}
+                              onKeyDown={handleKeyDown}
+                              className="h-8 text-sm"
+                            />
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                              <Check className="w-4 h-4 text-green-600" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                              <XIcon className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div 
+                            className="flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1 -mx-2 -my-1"
+                            onClick={() => startEditing(rowId, 'artista_encontrado', item.artista_encontrado)}
+                          >
+                            <span>{item.artista_encontrado}</span>
+                            <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                        )}
+                      </TableCell>
+
+                      {/* Compositor - Editável */}
+                      <TableCell>
+                        {editingCell?.rowId === rowId && editingCell?.field === 'compositor_encontrado' ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              ref={inputRef}
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={saveEdit}
+                              onKeyDown={handleKeyDown}
+                              className="h-8 text-sm"
+                            />
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                              <Check className="w-4 h-4 text-green-600" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                              <XIcon className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div 
+                            className="flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1 -mx-2 -my-1"
+                            onClick={() => startEditing(rowId, 'compositor_encontrado', item.compositor_encontrado)}
+                          >
+                            <span>{item.compositor_encontrado}</span>
+                            <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                        )}
+                      </TableCell>
+
+                      {/* Ano - Editável */}
+                      <TableCell>
+                        {editingCell?.rowId === rowId && editingCell?.field === 'ano_lancamento' ? (
+                          <div className="flex items-center gap-1">
+                            <Input
+                              ref={inputRef}
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              onBlur={saveEdit}
+                              onKeyDown={handleKeyDown}
+                              className="h-8 text-sm w-20"
+                              maxLength={4}
+                            />
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                              <Check className="w-4 h-4 text-green-600" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                              <XIcon className="w-4 h-4 text-red-600" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div 
+                            className="flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1 -mx-2 -my-1"
+                            onClick={() => startEditing(rowId, 'ano_lancamento', item.ano_lancamento === '0000' ? '' : item.ano_lancamento)}
+                          >
+                            <span>{item.ano_lancamento === '0000' ? '-' : item.ano_lancamento}</span>
+                            <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+                          </div>
+                        )}
+                      </TableCell>
+
+                      <TableCell>{getStatusBadge(item.status_pesquisa)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground truncate max-w-[200px]">
+                        {item.observacoes || '-'}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

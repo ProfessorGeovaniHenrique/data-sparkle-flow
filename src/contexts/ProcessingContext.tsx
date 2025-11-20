@@ -1,6 +1,10 @@
-import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
+import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
+import { toast } from 'sonner';
+import { EnrichedMusicData } from '@/lib/batchProcessor';
 
 export type ProcessingStatus = 'idle' | 'extracting' | 'processing' | 'enriching' | 'paused' | 'cancelled' | 'completed';
+
+const STORAGE_KEY = 'MUSIC_ENRICHER_STATE_V1';
 
 export interface ProcessingError {
   timestamp: string;
@@ -26,6 +30,7 @@ interface ProcessingState {
   progress: ProcessingProgress;
   errors: ProcessingError[];
   selectedTitles: string[];
+  results: EnrichedMusicData[];
 }
 
 export interface ProcessingContextType extends ProcessingState {
@@ -34,10 +39,13 @@ export interface ProcessingContextType extends ProcessingState {
   addError: (error: ProcessingError) => void;
   clearErrors: () => void;
   setSelectedTitles: (titles: string[]) => void;
+  setResults: (results: EnrichedMusicData[]) => void;
+  updateResultItem: (id: string, changes: Partial<EnrichedMusicData>) => void;
   pause: () => void;
   resume: () => void;
   cancel: () => void;
   reset: () => void;
+  clearSavedState: () => void;
 }
 
 const ProcessingContext = createContext<ProcessingContextType | undefined>(undefined);
@@ -57,9 +65,59 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
   const [progress, setProgressState] = useState<ProcessingProgress>(initialProgress);
   const [errors, setErrors] = useState<ProcessingError[]>([]);
   const [selectedTitles, setSelectedTitles] = useState<string[]>([]);
+  const [results, setResults] = useState<EnrichedMusicData[]>([]);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   const canPause = status === 'extracting' || status === 'enriching';
   const canCancel = status !== 'idle' && status !== 'completed' && status !== 'cancelled';
+
+  // Carregar estado salvo do localStorage na montagem
+  useEffect(() => {
+    try {
+      const savedState = localStorage.getItem(STORAGE_KEY);
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        
+        // Restaurar estado salvo
+        setStatus(parsed.status === 'running' ? 'paused' : parsed.status || 'idle');
+        setProgressState(parsed.progress || initialProgress);
+        setErrors(parsed.errors || []);
+        setResults(parsed.results || []);
+        setSelectedTitles(parsed.selectedTitles || []);
+        
+        if (parsed.results && parsed.results.length > 0) {
+          toast.info(`Progresso anterior restaurado: ${parsed.results.length} músicas processadas.`);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar estado salvo:', error);
+    } finally {
+      setIsInitialized(true);
+    }
+  }, []);
+
+  // Salvar estado automaticamente (com debounce)
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const timeoutId = setTimeout(() => {
+      try {
+        const stateToSave = {
+          status,
+          progress,
+          errors,
+          results,
+          selectedTitles,
+          timestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+      } catch (error) {
+        console.error('Erro ao salvar estado:', error);
+      }
+    }, 2000); // Debounce de 2 segundos
+
+    return () => clearTimeout(timeoutId);
+  }, [status, progress, errors, results, selectedTitles, isInitialized]);
 
   const setProgress = useCallback((newProgress: Partial<ProcessingProgress>) => {
     setProgressState(prev => {
@@ -95,12 +153,30 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [canCancel]);
 
+  const updateResultItem = useCallback((id: string, changes: Partial<EnrichedMusicData>) => {
+    setResults(prev => prev.map(item => 
+      item.id === id ? { ...item, ...changes } : item
+    ));
+    toast.success('Item atualizado com sucesso.');
+  }, []);
+
   const reset = useCallback(() => {
     setStatus('idle');
     setProgressState(initialProgress);
     setErrors([]);
     setSelectedTitles([]);
+    setResults([]);
   }, []);
+
+  const clearSavedState = useCallback(() => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      reset();
+      toast.info('Estado limpo. Pronto para novo processamento.');
+    } catch (error) {
+      console.error('Erro ao limpar estado salvo:', error);
+    }
+  }, [reset]);
 
   return (
     <ProcessingContext.Provider
@@ -111,15 +187,19 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
         progress,
         errors,
         selectedTitles,
+        results,
         setStatus,
         setProgress,
         addError,
         clearErrors,
         setSelectedTitles,
+        setResults,
+        updateResultItem,
         pause,
         resume,
         cancel,
         reset,
+        clearSavedState,
       }}
     >
       {children}

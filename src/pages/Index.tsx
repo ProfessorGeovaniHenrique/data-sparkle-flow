@@ -12,11 +12,11 @@ import { BatchProcessor, EnrichedMusicData } from '@/lib/batchProcessor';
 import { ProcessingProvider, useProcessing } from '@/contexts/ProcessingContext';
 
 const IndexContent = () => {
-  const [enrichedData, setEnrichedData] = useState<EnrichedMusicData[]>([]);
-  const processorRef = useRef<BatchProcessor | null>(null);
   const processingContext = useProcessing();
+  const processorRef = useRef<BatchProcessor | null>(null);
 
-  const isProcessing = processingContext.status === 'processing' || processingContext.status === 'paused';
+  const isProcessing = processingContext.status === 'enriching' || processingContext.status === 'paused';
+  const enrichedData = processingContext.results;
 
   const handleFilesSelected = useCallback((rawFiles: File[], parsedResults: ParseResult[]) => {
     const allMusics = parsedResults.flatMap(result => result.extractedData);
@@ -39,7 +39,6 @@ const IndexContent = () => {
   }, [processingContext]);
 
   const startBatchProcessing = async (musicsToProcess: ParsedMusic[]) => {
-    setEnrichedData([]);
     processingContext.reset();
 
     const processBatchFn = async (batch: ParsedMusic[]): Promise<EnrichedMusicData[]> => {
@@ -67,14 +66,16 @@ const IndexContent = () => {
       processingContext
     );
 
-    toast.info("Iniciando processamento em lotes de 50 músicas...");
-    
-    const results = await processorRef.current.start();
-    setEnrichedData(results);
+    toast.info("Iniciando processamento em lotes. Seu progresso será salvo automaticamente.");
+    processorRef.current.start();
   };
 
   const handleRetryFailed = (failedItems: string[]) => {
     toast.info(`Reprocessamento de ${failedItems.length} itens falhados não implementado ainda.`);
+  };
+
+  const handleNewProcessing = () => {
+    processingContext.clearSavedState();
   };
 
   const handleDownloadCSV = () => {
@@ -129,11 +130,20 @@ const IndexContent = () => {
               </p>
             </div>
           </div>
-          {enrichedData.length > 0 && !isProcessing && (
-            <Button onClick={handleDownloadCSV} className="gap-2">
-              <Download className="w-5 h-5" /> Exportar CSV ({enrichedData.length})
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {enrichedData.length > 0 && (
+              <>
+                <Button onClick={handleDownloadCSV} className="gap-2 shadow-lg hover:shadow-xl transition-all">
+                  <Download className="w-5 h-5" /> Exportar CSV ({enrichedData.length})
+                </Button>
+                {!isProcessing && (
+                  <Button onClick={handleNewProcessing} variant="outline" className="gap-2">
+                    Novo Processamento
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
         <div className="bg-card rounded-2xl shadow-sm border p-1">
