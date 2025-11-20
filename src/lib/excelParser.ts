@@ -191,15 +191,26 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         }
 
         if (headerRowIndex === -1 || columnIndices.musica === undefined) {
-          headerRowIndex = 0;
+          // Não encontrou cabeçalho estruturado
+          // Não alterar headerRowIndex aqui - deixar como -1 para acionar formato alternado
           columnIndices.musica = 0;
-          console.warn("Cabeçalho não detectado. Assumindo coluna A como títulos.");
+          console.warn("Cabeçalho não detectado. Tentando formato alternado ou coluna A.");
         }
+
+        console.log('[Parser] Detecção de cabeçalho:', {
+          headerRowIndex,
+          columnIndices,
+          detectouMultiplasColunas: Object.keys(columnIndices).length > 1
+        });
 
         const extractedData: ParsedMusic[] = [];
 
         // Detecta se é formato alternado (sem cabeçalho estruturado)
-        const isAlternatingFormat = headerRowIndex === -1 || headerRowIndex === 0;
+        // Só usa formato alternado se NÃO encontrou cabeçalho E tem apenas 1 coluna
+        const isAlternatingFormat = (
+          headerRowIndex === -1 && 
+          Object.keys(columnIndices).length <= 1
+        );
         const startIndex = isAlternatingFormat ? 0 : headerRowIndex + 1;
         const dataColumnIndex = 0; // Primeira coluna
 
@@ -246,6 +257,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
 
         } else {
           // FORMATO TABULAR COM FILL DOWN
+          console.log('[Parser] Usando formato TABULAR com fill down');
+          console.log('[Parser] Colunas detectadas:', columnIndices);
           let lastSeenArtista: string | undefined = undefined;
           let lastSeenCompositor: string | undefined = undefined;
 
