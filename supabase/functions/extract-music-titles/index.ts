@@ -18,82 +18,118 @@ Deno.serve(async (req) => {
     const files = formData.getAll('files');
     console.log(`Received ${files.length} files`);
     
+    if (files.length === 0) {
+      throw new Error('No files received');
+    }
+    
     const filesData: any[] = [];
     const allExtractedData: any[] = [];
     
     for (const file of files) {
-      if (!(file instanceof File)) continue;
-      
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-      
-      const sheetsData: any[] = [];
-      
-      for (const sheetName of workbook.SheetNames) {
-        const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-        
-        if (jsonData.length === 0) continue;
-        
-        const headers = jsonData[0] as any[];
-        const detectedColumns = detectMusicColumns(jsonData, headers);
-        
-        if (!detectedColumns.musicColumn) {
-          console.log(`No music column found in ${file.name} - ${sheetName}`);
-          continue;
-        }
-        
-        console.log(`Detected columns in ${file.name} - ${sheetName}:`, detectedColumns);
-        
-        // Extract data from detected columns
-        const extractedItems: any[] = [];
-        const preview: any[] = [];
-        
-        for (let i = 1; i < jsonData.length; i++) {
-          const row = jsonData[i] as any[];
-          
-          const musica = row[detectedColumns.musicColumn.index];
-          if (!musica || typeof musica !== 'string' || !musica.trim()) continue;
-          
-          const item: any = {
-            titulo: cleanTitle(musica),
-            fonte: file.name
-          };
-          
-          if (detectedColumns.artistColumn) {
-            const artist = row[detectedColumns.artistColumn.index];
-            if (artist && typeof artist === 'string') {
-              item.artista = artist.trim();
-            }
-          }
-          
-          if (detectedColumns.lyricsColumn) {
-            const lyrics = row[detectedColumns.lyricsColumn.index];
-            if (lyrics && typeof lyrics === 'string') {
-              item.letra = lyrics.trim();
-            }
-          }
-          
-          extractedItems.push(item);
-          if (preview.length < 10) {
-            preview.push(item);
-          }
-        }
-        
-        sheetsData.push({
-          sheetName,
-          detectedColumns,
-          preview,
-          count: extractedItems.length
-        });
-        
-        allExtractedData.push(...extractedItems);
+      if (!(file instanceof File)) {
+        console.log('Skipping non-file item');
+        continue;
       }
       
-      filesData.push({
-        filename: file.name,
-        sheets: sheetsData
-      });
+      console.log(`Processing file: ${file.name}, size: ${file.size} bytes`);
+      
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        console.log(`File loaded into memory: ${file.name}`);
+        
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        console.log(`Workbook parsed, sheets: ${workbook.SheetNames.join(', ')}`);
+        
+        const sheetsData: any[] = [];
+      
+        for (const sheetName of workbook.SheetNames) {
+          console.log(`Processing sheet: ${sheetName}`);
+          
+          try {
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+            
+            console.log(`Sheet ${sheetName}: ${jsonData.length} rows`);
+            
+            if (jsonData.length === 0) {
+              console.log(`Sheet ${sheetName} is empty, skipping`);
+              continue;
+            }
+            
+            const headers = jsonData[0] as any[];
+            console.log(`Headers in ${sheetName}:`, headers);
+            
+            const detectedColumns = detectMusicColumns(jsonData, headers);
+            console.log(`Detected columns in ${sheetName}:`, detectedColumns);
+            
+            if (!detectedColumns.musicColumn) {
+              console.log(`No music column found in ${file.name} - ${sheetName}`);
+              continue;
+            }
+            
+            // Extract data from detected columns
+            const extractedItems: any[] = [];
+            const preview: any[] = [];
+            
+            console.log(`Extracting data from ${jsonData.length - 1} rows...`);
+            
+            for (let i = 1; i < jsonData.length; i++) {
+              const row = jsonData[i] as any[];
+              
+              if (!row || row.length === 0) continue;
+              
+              const musica = row[detectedColumns.musicColumn.index];
+              if (!musica || typeof musica !== 'string' || !musica.trim()) continue;
+              
+              const item: any = {
+                titulo: cleanTitle(musica),
+                fonte: file.name
+              };
+              
+              if (detectedColumns.artistColumn) {
+                const artist = row[detectedColumns.artistColumn.index];
+                if (artist && typeof artist === 'string') {
+                  item.artista = artist.trim();
+                }
+              }
+              
+              if (detectedColumns.lyricsColumn) {
+                const lyrics = row[detectedColumns.lyricsColumn.index];
+                if (lyrics && typeof lyrics === 'string') {
+                  item.letra = lyrics.trim();
+                }
+              }
+              
+              extractedItems.push(item);
+              if (preview.length < 10) {
+                preview.push(item);
+              }
+            }
+            
+            console.log(`Extracted ${extractedItems.length} items from ${sheetName}`);
+            
+            sheetsData.push({
+              sheetName,
+              detectedColumns,
+              preview,
+              count: extractedItems.length
+            });
+            
+            allExtractedData.push(...extractedItems);
+          } catch (sheetError) {
+            console.error(`Error processing sheet ${sheetName}:`, sheetError);
+            // Continue with next sheet
+          }
+        }
+        
+        filesData.push({
+          filename: file.name,
+          sheets: sheetsData
+        });
+      } catch (fileError) {
+        console.error(`Error processing file ${file.name}:`, fileError);
+        // Continue with next file
+      }
     }
     
     // Remove duplicates based on title
@@ -146,10 +182,15 @@ Deno.serve(async (req) => {
 });
 
 function detectMusicColumns(data: any[][], headers: any[]) {
-  if (data.length < 2) return {};
+  if (!data || data.length < 2) {
+    console.log('Not enough data for column detection');
+    return {};
+  }
   
-  const numColumns = Math.max(...data.map(row => row.length));
+  const numColumns = Math.max(...data.map(row => row?.length || 0));
   const result: any = {};
+  
+  console.log(`Detecting columns across ${numColumns} columns`);
   
   // Patterns for music column
   const musicPatterns = [
@@ -180,10 +221,15 @@ function detectMusicColumns(data: any[][], headers: any[]) {
   for (let colIndex = 0; colIndex < numColumns; colIndex++) {
     const headerName = headers[colIndex]?.toString()?.trim() || '';
     
-    // Count non-empty cells in this column
+    // Count non-empty cells in this column (limit to first 100 rows for performance)
     let count = 0;
-    for (let rowIndex = 1; rowIndex < Math.min(data.length, 100); rowIndex++) {
-      const cellValue = data[rowIndex][colIndex];
+    const rowsToCheck = Math.min(data.length, 100);
+    
+    for (let rowIndex = 1; rowIndex < rowsToCheck; rowIndex++) {
+      const row = data[rowIndex];
+      if (!row || !row[colIndex]) continue;
+      
+      const cellValue = row[colIndex];
       if (cellValue && typeof cellValue === 'string' && cellValue.trim()) {
         count++;
       }
