@@ -1,19 +1,22 @@
 import { createContext, useContext, useState, ReactNode, useCallback } from 'react';
 
-export type ProcessingStatus = 'idle' | 'extracting' | 'enriching' | 'paused' | 'cancelled' | 'completed';
+export type ProcessingStatus = 'idle' | 'extracting' | 'processing' | 'enriching' | 'paused' | 'cancelled' | 'completed';
 
-interface ProcessingError {
-  item: string;
-  error: string;
-  timestamp: Date;
+export interface ProcessingError {
+  timestamp: string;
+  message: string;
+  details?: string;
+  failedItems: string[];
 }
 
-interface ProcessingProgress {
+export interface ProcessingProgress {
   current: number;
   total: number;
   percentage: number;
-  speed: number;
-  eta: number;
+  itemsPerSecond?: number;
+  estimatedTimeRemaining?: number;
+  speed?: number;
+  eta?: number;
 }
 
 interface ProcessingState {
@@ -25,7 +28,7 @@ interface ProcessingState {
   selectedTitles: string[];
 }
 
-interface ProcessingContextType extends ProcessingState {
+export interface ProcessingContextType extends ProcessingState {
   setStatus: (status: ProcessingStatus) => void;
   setProgress: (progress: Partial<ProcessingProgress>) => void;
   addError: (error: ProcessingError) => void;
@@ -43,6 +46,8 @@ const initialProgress: ProcessingProgress = {
   current: 0,
   total: 0,
   percentage: 0,
+  itemsPerSecond: 0,
+  estimatedTimeRemaining: 0,
   speed: 0,
   eta: 0,
 };

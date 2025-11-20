@@ -18,7 +18,7 @@ export const ErrorLog = ({ onRetry }: ErrorLogProps) => {
 
   const handleExportLog = () => {
     const logContent = errors.map(err => 
-      `${err.timestamp.toISOString()}\t${err.item}\t${err.error}`
+      `${err.timestamp}\t${err.message}\t${err.details || ''}\t${err.failedItems.join(', ')}`
     ).join('\n');
     
     const blob = new Blob([logContent], { type: 'text/plain' });
@@ -29,7 +29,7 @@ export const ErrorLog = ({ onRetry }: ErrorLogProps) => {
   };
 
   const handleRetry = () => {
-    const failedItems = errors.map(err => err.item);
+    const failedItems = errors.flatMap(err => err.failedItems);
     if (onRetry) {
       onRetry(failedItems);
       clearErrors();
@@ -58,11 +58,17 @@ export const ErrorLog = ({ onRetry }: ErrorLogProps) => {
                 <div key={idx} className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 text-sm">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1">
-                      <p className="font-medium mb-1">{error.item}</p>
-                      <p className="text-xs text-muted-foreground">{error.error}</p>
+                      <p className="font-medium mb-1">{error.message}</p>
+                      <p className="text-xs text-muted-foreground">{error.details}</p>
+                      {error.failedItems.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Itens falhos: {error.failedItems.slice(0, 3).join(', ')}
+                          {error.failedItems.length > 3 && ` +${error.failedItems.length - 3} mais`}
+                        </p>
+                      )}
                     </div>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
-                      {error.timestamp.toLocaleTimeString()}
+                      {new Date(error.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
                 </div>

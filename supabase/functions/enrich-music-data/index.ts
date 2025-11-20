@@ -12,8 +12,30 @@ serve(async (req) => {
   }
 
   try {
-    const { titles } = await req.json();
-    console.log(`Starting enrichment for ${titles.length} titles`);
+    const body = await req.json();
+    
+    // Suporta tanto formato antigo { titles: string[] } quanto novo { musics: [{id, titulo, artista}] }
+    let musicsToProcess: Array<{ id?: string; titulo: string; artista?: string }> = [];
+    
+    if (body.titles && Array.isArray(body.titles)) {
+      // Formato antigo: apenas lista de títulos
+      musicsToProcess = body.titles.map((titulo: string, index: number) => ({
+        id: `legacy-${index}`,
+        titulo,
+        artista: undefined
+      }));
+    } else if (body.musics && Array.isArray(body.musics)) {
+      // Formato novo: objetos com id, titulo, artista_contexto
+      musicsToProcess = body.musics.map((m: any) => ({
+        id: m.id || `unknown-${Math.random()}`,
+        titulo: m.titulo,
+        artista: m.artista_contexto || m.artista
+      }));
+    } else {
+      throw new Error('Formato de payload inválido. Esperado { titles: string[] } ou { musics: [{id, titulo, artista}] }');
+    }
+    
+    console.log(`Starting enrichment for ${musicsToProcess.length} items`);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
@@ -22,14 +44,15 @@ serve(async (req) => {
 
     const enrichedData = [];
     
-    for (let i = 0; i < titles.length; i++) {
-      const titulo = titles[i];
-      console.log(`Enriching ${i + 1}/${titles.length}: ${titulo}`);
+    for (let i = 0; i < musicsToProcess.length; i++) {
+      const music = musicsToProcess[i];
+      console.log(`Enriching ${i + 1}/${musicsToProcess.length}: ${music.titulo}`);
       
       try {
-        const metadata = await enrichSingleTitle(titulo, LOVABLE_API_KEY);
+        const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista);
         enrichedData.push({
-          titulo_original: titulo,
+          id: music.id,
+          titulo_original: music.titulo,
           artista_encontrado: metadata.artista || 'Não Identificado',
           compositor_encontrado: metadata.compositor || 'Não Identificado',
           ano_lancamento: validateYear(metadata.ano),
@@ -37,25 +60,32 @@ serve(async (req) => {
           status_pesquisa: 'Sucesso'
         });
       } catch (error) {
-        console.error(`Error enriching title "${titulo}":`, error);
+        console.error(`Error enriching title "${music.titulo}":`, error);
         enrichedData.push({
-          titulo_original: titulo,
+          id: music.id,
+          titulo_original: music.titulo,
           artista_encontrado: 'Não Identificado',
           compositor_encontrado: 'Não Identificado',
           ano_lancamento: '0000',
-          observacoes: 'Erro na busca',
+          observacoes: `Erro na busca: ${error instanceof Error ? error.message : 'Desconhecido'}`,
           status_pesquisa: 'Falha'
         });
       }
       
       // Add delay between requests to avoid rate limiting
-      if (i < titles.length - 1) {
+      if (i < musicsToProcess.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
     }
 
     return new Response(
-      JSON.stringify({ enrichedData }),
+      JSON.stringify({ 
+        success: true,
+        results: enrichedData,
+        processedCount: enrichedData.length,
+        successCount: enrichedData.filter(d => d.status_pesquisa === 'Sucesso').length,
+        failureCount: enrichedData.filter(d => d.status_pesquisa === 'Falha').length
+      }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 200 
@@ -93,10 +123,12 @@ serve(async (req) => {
   }
 });
 
-async function enrichSingleTitle(titulo: string, apiKey: string) {
+async function enrichSingleTitle(titulo: string, apiKey: string, artistaContexto?: string) {
+  const contextoArtista = artistaContexto ? `\nArtista de Contexto (se disponível): ${artistaContexto}` : '';
+  
   const prompt = `Você é um especialista em musicologia brasileira, com foco especial em gêneros nordestinos como Forró, Piseiro, Baião e Arrocha.
 
-Música: "${titulo}"
+Música: "${titulo}"${contextoArtista}
 
 Sua tarefa é identificar:
 1. **Artista Principal**: O intérprete mais famoso desta música (priorize versões de Forró/Piseiro/Baião/Arrocha)
