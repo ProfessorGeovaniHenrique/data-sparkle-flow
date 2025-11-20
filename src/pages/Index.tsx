@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { supabase } from '@/integrations/supabase/client';
 import { FileUpload } from '@/components/FileUpload';
 import { ProcessingControl } from '@/components/ProcessingControl';
-import EnrichedDataTable from '@/components/EnrichedDataTable';
+import { WorkflowTabs } from '@/components/WorkflowTabs';
 import { ErrorLog } from '@/components/ErrorLog';
 import { Download, Music, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,10 @@ const IndexContent = () => {
 
   const isProcessing = processingContext.status === 'enriching' || processingContext.status === 'paused';
   const enrichedData = processingContext.results;
+  
+  const queuedItems = processingContext.getQueuedItems();
+  const pendingItems = processingContext.getPendingItems();
+  const approvedItems = processingContext.getApprovedItems();
 
   const handleFilesSelected = useCallback((rawFiles: File[], parsedResults: ParseResult[]) => {
     const allMusics = parsedResults.flatMap(result => result.extractedData);
@@ -103,8 +107,10 @@ const IndexContent = () => {
   };
 
   const handleDownloadCSV = () => {
-    if (enrichedData.length === 0) {
-      toast.warning("Não há dados processados para exportar.");
+    const approvedData = processingContext.getApprovedItems();
+    
+    if (approvedData.length === 0) {
+      toast.warning("Não há músicas aprovadas para exportar.");
       return;
     }
 
@@ -112,7 +118,7 @@ const IndexContent = () => {
       ['Título Original', 'Artista Encontrado', 'Compositor', 'Ano', 'Status', 'Observações'].join(';')
     ];
 
-    enrichedData.forEach(item => {
+    approvedData.forEach(item => {
       const row = [
         `"${item.titulo_original.replace(/"/g, '""')}"`,
         `"${item.artista_encontrado.replace(/"/g, '""')}"`,
@@ -129,12 +135,12 @@ const IndexContent = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `musicas_enriquecidas_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `musicas_aprovadas_${new Date().toISOString().slice(0, 10)}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    toast.success("Arquivo CSV gerado e baixado com sucesso!");
+    toast.success(`${approvedData.length} músicas aprovadas exportadas com sucesso!`);
   };
 
   return (
@@ -158,7 +164,7 @@ const IndexContent = () => {
             {enrichedData.length > 0 && (
               <>
                 <Button onClick={handleDownloadCSV} className="gap-2 shadow-lg hover:shadow-xl transition-all">
-                  <Download className="w-5 h-5" /> Exportar CSV ({enrichedData.length})
+                  <Download className="w-5 h-5" /> Exportar CSV ({approvedItems.length})
                 </Button>
                 {!isProcessing && (
                   <AlertDialog>
@@ -208,7 +214,12 @@ const IndexContent = () => {
         )}
 
         {enrichedData.length > 0 && (
-          <EnrichedDataTable data={enrichedData} isLoading={isProcessing} />
+          <WorkflowTabs 
+            queuedItems={queuedItems}
+            pendingItems={pendingItems}
+            approvedItems={approvedItems}
+            isProcessing={isProcessing}
+          />
         )}
       </div>
     </div>
