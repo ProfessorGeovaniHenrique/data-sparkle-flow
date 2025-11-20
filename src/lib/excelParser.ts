@@ -75,19 +75,69 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         }
 
         const extractedData: ParsedMusic[] = [];
-        for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          const rawTitle = row[columnIndices.musica];
 
-          if (rawTitle && typeof rawTitle === 'string' && rawTitle.trim().length > 1) {
+        // Detecta se é formato alternado (sem cabeçalho estruturado)
+        const isAlternatingFormat = headerRowIndex === -1 || headerRowIndex === 0;
+        const startIndex = isAlternatingFormat ? 0 : headerRowIndex + 1;
+        const dataColumnIndex = 0; // Primeira coluna
+
+        if (isAlternatingFormat) {
+          // FORMATO ALTERNADO: Linha 1 = Título, Linha 2 = Artista
+          let pendingTitle: string | null = null;
+          let pendingTitleRowIndex = -1;
+
+          for (let i = startIndex; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            const cellValue = row[dataColumnIndex];
+            const cleanedValue = cleanTitle(String(cellValue || ''));
+
+            if (!cleanedValue || cleanedValue.length < 2) {
+              continue; // Pula linhas vazias
+            }
+
+            if (pendingTitle === null) {
+              // Linha do título
+              pendingTitle = cleanedValue;
+              pendingTitleRowIndex = i;
+            } else {
+              // Linha do artista
+              extractedData.push({
+                id: `${file.name}-${pendingTitleRowIndex}`,
+                titulo: pendingTitle,
+                artista: cleanedValue,
+                fonte: file.name
+              });
+              pendingTitle = null;
+              pendingTitleRowIndex = -1;
+            }
+          }
+
+          // Se sobrou título sem artista, adiciona mesmo assim
+          if (pendingTitle !== null) {
             extractedData.push({
-              id: `${file.name}-${i}`,
-              titulo: cleanTitle(rawTitle),
-              artista: columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined,
-              compositor: columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined,
-              ano: columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined,
+              id: `${file.name}-${pendingTitleRowIndex}`,
+              titulo: pendingTitle,
+              artista: 'Não Identificado',
               fonte: file.name
             });
+          }
+
+        } else {
+          // FORMATO TABULAR ORIGINAL (mantém lógica existente)
+          for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            const rawTitle = row[columnIndices.musica];
+
+            if (rawTitle && typeof rawTitle === 'string' && rawTitle.trim().length > 1) {
+              extractedData.push({
+                id: `${file.name}-${i}`,
+                titulo: cleanTitle(rawTitle),
+                artista: columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined,
+                compositor: columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined,
+                ano: columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined,
+                fonte: file.name
+              });
+            }
           }
         }
 
@@ -96,10 +146,10 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           totalRows: extractedData.length,
           extractedData: extractedData,
           columnsDetected: {
-            musica: columnIndices.musica !== undefined,
-            artista: columnIndices.artista !== undefined,
-            compositor: columnIndices.compositor !== undefined,
-            ano: columnIndices.ano !== undefined
+            musica: true,
+            artista: isAlternatingFormat ? true : (columnIndices.artista !== undefined),
+            compositor: isAlternatingFormat ? false : (columnIndices.compositor !== undefined),
+            ano: isAlternatingFormat ? false : (columnIndices.ano !== undefined)
           }
         });
 
