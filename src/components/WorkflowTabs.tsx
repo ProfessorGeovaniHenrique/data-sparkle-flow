@@ -407,20 +407,28 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
                       </TableCell>
 
                       <TableCell>
-                        {item.status_pesquisa === 'Sucesso' ? (
-                          <Badge variant="default" className="gap-1 bg-green-500/10 text-green-700 border-green-500/20">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Sucesso
-                          </Badge>
-                        ) : item.status_pesquisa === 'Parcial' ? (
-                          <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-700 border-yellow-500/20">
-                            Parcial
-                          </Badge>
-                        ) : (
-                          <Badge variant="destructive" className="gap-1">
-                            Falha
-                          </Badge>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {item.status_pesquisa === 'Sucesso' || item.status_pesquisa === 'Sucesso (Web)' ? (
+                            <Badge variant="default" className="gap-1 bg-green-500/10 text-green-700 border-green-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Sucesso
+                            </Badge>
+                          ) : item.status_pesquisa === 'Parcial' ? (
+                            <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-700 border-yellow-500/20">
+                              Parcial
+                            </Badge>
+                          ) : (
+                            <Badge variant="destructive" className="gap-1">
+                              Falha
+                            </Badge>
+                          )}
+                          {item.enriched_by_web && (
+                            <Badge variant="secondary" className="gap-1 text-xs bg-blue-500/10 text-blue-700 border-blue-500/20">
+                              <Search className="w-3 h-3" />
+                              Web
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
 
                       <TableCell>

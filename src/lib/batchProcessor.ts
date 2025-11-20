@@ -10,6 +10,7 @@ export interface EnrichedMusicData {
   status_pesquisa: string;
   observacoes?: string;
   approval_status?: 'pending' | 'approved';
+  enriched_by_web?: boolean; // Indica se foi usado fallback de pesquisa web
 }
 
 type ProcessBatchFn = (batch: ParsedMusic[]) => Promise<EnrichedMusicData[]>;

@@ -21,6 +21,7 @@ export interface EnrichedMusicData {
   genero?: string;
   gravadora?: string;
   pais_origem?: string;
+  enriched_by_web?: boolean; // Indica se foi usado fallback de pesquisa web
 }
 
 export interface MusicData {
