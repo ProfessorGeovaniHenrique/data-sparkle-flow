@@ -58,11 +58,23 @@ const Index = () => {
       const formData = new FormData();
       selectedFiles.forEach(file => formData.append('files', file));
 
-      const { data: result, error } = await supabase.functions.invoke('extract-music-titles', {
-        body: formData
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extract-music-titles`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: formData
+        }
+      );
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
+
+      const result = await response.json();
       if (!result) throw new Error('No result from extraction');
 
       setExtractionResults(result);
