@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ParseResult, ParsedMusic } from '@/lib/excelParser';
 import { BatchProcessor, EnrichedMusicData } from '@/lib/batchProcessor';
-import { ProcessingProvider, useProcessing } from '@/contexts/ProcessingContext';
+import { useProcessing } from '@/contexts/ProcessingContext';
 
 const IndexContent = () => {
   const processingContext = useProcessing();
@@ -202,10 +202,4 @@ const IndexContent = () => {
   );
 };
 
-const Index = () => (
-  <ProcessingProvider>
-    <IndexContent />
-  </ProcessingProvider>
-);
-
-export default Index;
+export default IndexContent;
