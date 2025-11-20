@@ -1,5 +1,8 @@
 project_id = "leyjlzjqgyodwftnrvfc"
 
+[functions.extract-music-titles]
+verify_jwt = false
+
 [functions.process-music-data]
 verify_jwt = false
 

@@ -1,15 +1,15 @@
 import { CheckCircle, Circle, Loader2 } from "lucide-react";
 
 interface ProcessingPipelineProps {
-  currentStep: 'upload' | 'process' | 'enrich' | 'validate' | 'export';
+  currentStep: 'upload' | 'extract' | 'enrich' | 'validate' | 'export';
 }
 
 const steps = [
   { key: 'upload', label: 'Upload de Arquivos' },
-  { key: 'process', label: 'Processamento e Limpeza' },
-  { key: 'enrich', label: 'Enriquecimento IA' },
+  { key: 'extract', label: 'Extração de Títulos' },
+  { key: 'enrich', label: 'Busca de Metadados (IA)' },
   { key: 'validate', label: 'Validação' },
-  { key: 'export', label: 'Exportação' },
+  { key: 'export', label: 'Exportação CSV' },
 ];
 
 export const ProcessingPipeline = ({ currentStep }: ProcessingPipelineProps) => {
