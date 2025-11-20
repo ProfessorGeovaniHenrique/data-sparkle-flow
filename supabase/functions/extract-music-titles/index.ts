@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import * as XLSX from 'https://esm.sh/xlsx@0.18.5';
 
 const corsHeaders = {
@@ -6,14 +5,18 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-serve(async (req) => {
+Deno.serve(async (req) => {
+  console.log('Extract-music-titles function called');
+  
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    console.log('Processing request...');
     const formData = await req.formData();
     const files = formData.getAll('files');
+    console.log(`Received ${files.length} files`);
     
     console.log(`Processing ${files.length} files for title extraction`);
     
@@ -89,10 +92,12 @@ serve(async (req) => {
     
   } catch (error) {
     console.error('Error in extract-music-titles:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Unknown error',
-        details: error instanceof Error ? error.stack : undefined
+        details: error instanceof Error ? error.stack : undefined,
+        type: error?.constructor?.name
       }),
       { 
         status: 500,
