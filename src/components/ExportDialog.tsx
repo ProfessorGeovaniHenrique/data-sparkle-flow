@@ -1,8 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { RadioGroup } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import { Download } from "lucide-react";
 import { useState } from "react";
 
 interface ExportDialogProps {
@@ -12,101 +11,115 @@ interface ExportDialogProps {
 }
 
 export interface ExportOptions {
-  filter: 'all' | 'validated' | 'validated_and_rejected';
-  includeOriginal: boolean;
-  multipleSheets: boolean;
+  format: 'csv' | 'xlsx';
+  delimiter: ',' | ';';
+  encoding: 'utf8' | 'utf8-bom';
 }
 
 export const ExportDialog = ({ open, onOpenChange, onExport }: ExportDialogProps) => {
-  const [filter, setFilter] = useState<'all' | 'validated' | 'validated_and_rejected'>('validated');
-  const [includeOriginal, setIncludeOriginal] = useState(false);
-  const [multipleSheets, setMultipleSheets] = useState(true);
+  const [format, setFormat] = useState<'csv' | 'xlsx'>('csv');
+  const [delimiter, setDelimiter] = useState<',' | ';'>(';');
+  const [encoding, setEncoding] = useState<'utf8' | 'utf8-bom'>('utf8-bom');
   
   const handleExport = () => {
     onExport({
-      filter,
-      includeOriginal,
-      multipleSheets,
+      format,
+      delimiter,
+      encoding
     });
     onOpenChange(false);
   };
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Opções de Exportação</DialogTitle>
+          <DialogTitle>Configurar Exportação CSV</DialogTitle>
         </DialogHeader>
         
         <div className="space-y-6 py-4">
           <div className="space-y-3">
-            <Label>Quais registros exportar?</Label>
-            <RadioGroup value={filter} onValueChange={(v) => setFilter(v as any)}>
+            <Label>Delimitador</Label>
+            <RadioGroup value={delimiter} onValueChange={(value: any) => setDelimiter(value)}>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="validated" id="validated" />
-                <Label htmlFor="validated" className="font-normal">
-                  Apenas aprovados
+                <input
+                  type="radio"
+                  id="semicolon"
+                  value=";"
+                  checked={delimiter === ';'}
+                  onChange={(e) => setDelimiter(e.target.value as any)}
+                  className="w-4 h-4"
+                />
+                <Label htmlFor="semicolon" className="font-normal cursor-pointer">
+                  Ponto e vírgula (;) - Recomendado para Excel
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="validated_and_rejected" id="validated_and_rejected" />
-                <Label htmlFor="validated_and_rejected" className="font-normal">
-                  Aprovados e rejeitados
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="all" id="all" />
-                <Label htmlFor="all" className="font-normal">
-                  Todos (incluindo pendentes)
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-          
-          <div className="space-y-3">
-            <Label>Formato do arquivo</Label>
-            <RadioGroup value={multipleSheets ? 'multiple' : 'single'} onValueChange={(v) => setMultipleSheets(v === 'multiple')}>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="multiple" id="multiple" />
-                <Label htmlFor="multiple" className="font-normal">
-                  Múltiplas abas (Aprovados, Rejeitados, Todos)
-                </Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="single" id="single" />
-                <Label htmlFor="single" className="font-normal">
-                  Aba única
+                <input
+                  type="radio"
+                  id="comma"
+                  value=","
+                  checked={delimiter === ','}
+                  onChange={(e) => setDelimiter(e.target.value as any)}
+                  className="w-4 h-4"
+                />
+                <Label htmlFor="comma" className="font-normal cursor-pointer">
+                  Vírgula (,) - Padrão CSV
                 </Label>
               </div>
             </RadioGroup>
           </div>
           
           <div className="space-y-3">
-            <Label>Dados originais</Label>
-            <RadioGroup value={includeOriginal ? 'yes' : 'no'} onValueChange={(v) => setIncludeOriginal(v === 'yes')}>
+            <Label>Codificação</Label>
+            <RadioGroup value={encoding} onValueChange={(value: any) => setEncoding(value)}>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="yes" id="yes" />
-                <Label htmlFor="yes" className="font-normal">
-                  Incluir dados originais (antes da limpeza)
+                <input
+                  type="radio"
+                  id="utf8-bom"
+                  value="utf8-bom"
+                  checked={encoding === 'utf8-bom'}
+                  onChange={(e) => setEncoding(e.target.value as any)}
+                  className="w-4 h-4"
+                />
+                <Label htmlFor="utf8-bom" className="font-normal cursor-pointer">
+                  UTF-8 com BOM - Compatível com Excel antigo
                 </Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="no" id="no" />
-                <Label htmlFor="no" className="font-normal">
-                  Apenas dados processados e enriquecidos
+                <input
+                  type="radio"
+                  id="utf8"
+                  value="utf8"
+                  checked={encoding === 'utf8'}
+                  onChange={(e) => setEncoding(e.target.value as any)}
+                  className="w-4 h-4"
+                />
+                <Label htmlFor="utf8" className="font-normal cursor-pointer">
+                  UTF-8 padrão
                 </Label>
               </div>
             </RadioGroup>
+          </div>
+          
+          <div className="bg-muted/50 p-3 rounded-lg text-sm">
+            <p className="font-medium mb-1">Colunas do CSV:</p>
+            <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+              <li>Título da Música</li>
+              <li>Nome do Artista</li>
+              <li>Nome do Compositor</li>
+              <li>Ano de Lançamento</li>
+              <li>Status do Processamento</li>
+            </ul>
           </div>
         </div>
         
-        <div className="flex gap-3">
-          <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
+        <div className="flex gap-2 justify-end">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button className="flex-1" onClick={handleExport}>
-            <Download className="w-4 h-4 mr-2" />
-            Exportar
+          <Button onClick={handleExport}>
+            Exportar CSV
           </Button>
         </div>
       </DialogContent>

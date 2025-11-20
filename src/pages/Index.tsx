@@ -2,33 +2,37 @@ import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
 import { StatsCard } from "@/components/StatsCard";
 import { ProcessingPipeline } from "@/components/ProcessingPipeline";
-import { CleaningResults } from "@/components/CleaningResults";
+import { TitleExtractionResults } from "@/components/TitleExtractionResults";
 import { EnrichmentProgress } from "@/components/EnrichmentProgress";
-import { ValidationTable } from "@/components/ValidationTable";
+import { ValidationTable, EnrichedMusicItem } from "@/components/ValidationTable";
 import { ExportDialog, ExportOptions } from "@/components/ExportDialog";
-import { Database, Sparkles, CheckCircle, XCircle, AlertCircle } from "lucide-react";
+import { Database, Sparkles, CheckCircle, FileText, Download } from "lucide-react";
 import { toast } from "sonner";
-import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
-import { MusicData, CleaningStats } from "@/types/music";
 
 const Index = () => {
-  const [musicData, setMusicData] = useState<MusicData[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [isEnriching, setIsEnriching] = useState(false);
-  const [currentStep, setCurrentStep] = useState<'upload' | 'process' | 'enrich' | 'validate' | 'export'>('upload');
-  const [cleaningStats, setCleaningStats] = useState<CleaningStats | null>(null);
+  const [currentStep, setCurrentStep] = useState<'upload' | 'extract' | 'enrich' | 'validate' | 'export'>('upload');
+  
+  const [extractionResults, setExtractionResults] = useState<{
+    rawCount: number;
+    cleanCount: number;
+    titles: string[];
+    detectionResults: any[];
+  } | null>(null);
+  
+  const [enrichedData, setEnrichedData] = useState<EnrichedMusicItem[]>([]);
   const [enrichmentProgress, setEnrichmentProgress] = useState({ total: 0, processed: 0, currentSong: '' });
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   const stats = {
-    total: musicData.length,
-    pending: musicData.filter(d => d.status === "uploaded" || d.status === "processed" || d.status === "ready_for_enrichment").length,
-    enriched: musicData.filter(d => d.status === "enriched" || d.status === "enriching").length,
-    validated: musicData.filter(d => d.status === "validated").length,
-    rejected: musicData.filter(d => d.status === "rejected").length,
+    titlesFound: extractionResults?.rawCount || 0,
+    titlesClean: extractionResults?.cleanCount || 0,
+    enriched: enrichedData.filter(d => d.status_pesquisa === 'Sucesso').length,
+    failed: enrichedData.filter(d => d.status_pesquisa === 'Falha').length,
   };
 
   const handleFilesSelect = (files: File[]) => {
@@ -41,109 +45,92 @@ const Index = () => {
     toast.info("Arquivo removido");
   };
 
-  const handleProcessFiles = async () => {
+  const handleExtractTitles = async () => {
     if (selectedFiles.length === 0) {
       toast.error("Nenhum arquivo selecionado");
       return;
     }
 
-    setIsProcessing(true);
-    setCurrentStep('process');
+    setIsExtracting(true);
+    setCurrentStep('extract');
     
     try {
-      // Read all files and combine data
-      let allRawData: any[] = [];
-      
-      for (const file of selectedFiles) {
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet);
-        allRawData = [...allRawData, ...jsonData.map((row: any) => ({ ...row, source_file: file.name }))];
-      }
+      const formData = new FormData();
+      selectedFiles.forEach(file => formData.append('files', file));
 
-      // Call edge function to process and clean data
-      const { data: result, error } = await supabase.functions.invoke('process-music-data', {
-        body: { data: allRawData }
+      const { data: result, error } = await supabase.functions.invoke('extract-music-titles', {
+        body: formData
       });
 
       if (error) throw error;
-      if (!result) throw new Error('No result from processing');
+      if (!result) throw new Error('No result from extraction');
 
-      const processedMusicData: MusicData[] = result.processed_data;
-      setMusicData(processedMusicData);
-      setCleaningStats(result.stats);
+      setExtractionResults(result);
       setSelectedFiles([]);
       
-      toast.success(`${result.stats.final_count} músicas processadas e limpas!`);
+      toast.success(`${result.cleanCount} títulos únicos extraídos!`);
       setCurrentStep('enrich');
     } catch (error: any) {
-      toast.error("Erro ao processar arquivos: " + error.message);
+      toast.error("Erro ao extrair títulos: " + error.message);
       console.error(error);
       setCurrentStep('upload');
     } finally {
-      setIsProcessing(false);
+      setIsExtracting(false);
     }
   };
 
   const handleEnrichData = async () => {
-    const processedSongs = musicData.filter(d => d.status === 'processed');
-    
-    if (processedSongs.length === 0) {
-      toast.error("Nenhuma música processada para enriquecer");
+    if (!extractionResults || extractionResults.titles.length === 0) {
+      toast.error("Nenhum título para enriquecer");
       return;
     }
 
     setIsEnriching(true);
     setCurrentStep('enrich');
-    setEnrichmentProgress({ total: processedSongs.length, processed: 0, currentSong: '' });
+    setEnrichmentProgress({ total: extractionResults.titles.length, processed: 0, currentSong: '' });
 
     try {
-      // Process in batches of 10
-      const batchSize = 10;
-      let allEnriched: MusicData[] = [];
+      const batchSize = 20;
+      let allEnriched: EnrichedMusicItem[] = [];
 
-      for (let i = 0; i < processedSongs.length; i += batchSize) {
-        const batch = processedSongs.slice(i, i + batchSize);
+      for (let i = 0; i < extractionResults.titles.length; i += batchSize) {
+        const batch = extractionResults.titles.slice(i, i + batchSize);
         
         setEnrichmentProgress({
-          total: processedSongs.length,
+          total: extractionResults.titles.length,
           processed: i,
-          currentSong: batch[0]?.processed_data?.nome_musica || ''
+          currentSong: batch[0] || ''
         });
 
         const { data: result, error } = await supabase.functions.invoke('enrich-music-data', {
-          body: { songs: batch }
+          body: { titles: batch }
         });
 
         if (error) {
           if (error.message.includes('429')) {
-            toast.error("Limite de requisições atingido. Aguarde um momento...");
+            toast.error("Limite de requisições atingido. Aguardando...");
             await new Promise(resolve => setTimeout(resolve, 5000));
-            i -= batchSize; // Retry this batch
+            i -= batchSize;
             continue;
           }
           if (error.message.includes('402')) {
-            toast.error("Créditos insuficientes. Adicione créditos à sua conta Lovable AI.");
+            toast.error("Créditos insuficientes no Lovable AI.");
             break;
           }
           throw error;
         }
 
-        allEnriched = [...allEnriched, ...result.enriched_songs];
+        allEnriched = [...allEnriched, ...result.enrichedData];
       }
 
-      // Update music data with enriched results
-      setMusicData(prev => 
-        prev.map(song => {
-          const enriched = allEnriched.find(e => e.id === song.id);
-          return enriched || song;
-        })
-      );
-
-      setEnrichmentProgress({ total: processedSongs.length, processed: processedSongs.length, currentSong: '' });
-      toast.success(`${allEnriched.length} músicas enriquecidas com sucesso!`);
+      setEnrichedData(allEnriched);
+      setEnrichmentProgress({ 
+        total: extractionResults.titles.length, 
+        processed: allEnriched.length, 
+        currentSong: '' 
+      });
+      
+      toast.success(`${allEnriched.length} músicas enriquecidas!`);
       setCurrentStep('validate');
     } catch (error: any) {
       toast.error("Erro ao enriquecer dados: " + error.message);
@@ -153,118 +140,33 @@ const Index = () => {
     }
   };
 
-  const handleValidate = (id: string) => {
-    setMusicData(prev =>
-      prev.map(song =>
-        song.id === id ? { ...song, status: "validated" as const, validated_at: new Date().toISOString() } : song
-      )
-    );
-    toast.success("Música validada!");
-  };
-
-  const handleReject = (id: string) => {
-    setMusicData(prev =>
-      prev.map(song =>
-        song.id === id ? { ...song, status: "rejected" as const } : song
-      )
-    );
-    toast.success("Música rejeitada!");
-  };
-
-  const handleEdit = (id: string, updates: Partial<MusicData>) => {
-    setMusicData(prev =>
-      prev.map(song =>
-        song.id === id ? { ...song, ...updates } : song
-      )
-    );
-    toast.success("Dados atualizados!");
-  };
-
-  const handleDownloadProcessed = () => {
-    const dataToExport = musicData
-      .filter(d => d.status === 'processed')
-      .map(d => ({
-        'Nome da Música': d.processed_data?.nome_musica,
-        'Autor': d.processed_data?.autor,
-        'Letra': d.processed_data?.letra,
-        'Arquivo Original': d.source_file,
-      }));
-
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Dados Processados");
-    XLSX.writeFile(workbook, "musicas_processadas.xlsx");
-    toast.success("Dados processados exportados!");
-  };
-
-  const handleExport = (options: ExportOptions) => {
-    let dataToExport = musicData;
-
-    // Filter based on options
-    if (options.filter === 'validated') {
-      dataToExport = musicData.filter(d => d.status === 'validated');
-    } else if (options.filter === 'validated_and_rejected') {
-      dataToExport = musicData.filter(d => d.status === 'validated' || d.status === 'rejected');
-    }
-
-    const workbook = XLSX.utils.book_new();
-
-    if (options.multipleSheets) {
-      // Multiple sheets
-      const validated = dataToExport.filter(d => d.status === 'validated').map(formatForExport(options.includeOriginal));
-      const rejected = dataToExport.filter(d => d.status === 'rejected').map(formatForExport(options.includeOriginal));
-      const all = dataToExport.map(formatForExport(options.includeOriginal));
-
-      if (validated.length > 0) {
-        const ws1 = XLSX.utils.json_to_sheet(validated);
-        XLSX.utils.book_append_sheet(workbook, ws1, "Aprovados");
-      }
-      if (rejected.length > 0) {
-        const ws2 = XLSX.utils.json_to_sheet(rejected);
-        XLSX.utils.book_append_sheet(workbook, ws2, "Rejeitados");
-      }
-      if (all.length > 0) {
-        const ws3 = XLSX.utils.json_to_sheet(all);
-        XLSX.utils.book_append_sheet(workbook, ws3, "Todos");
-      }
-    } else {
-      // Single sheet
-      const formattedData = dataToExport.map(formatForExport(options.includeOriginal));
-      const worksheet = XLSX.utils.json_to_sheet(formattedData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Dados");
-    }
-
-    XLSX.writeFile(workbook, "musicas_final.xlsx");
-    toast.success("Exportação concluída!");
-  };
-
-  const formatForExport = (includeOriginal: boolean) => (song: MusicData) => {
-    const base: any = {
-      'Nome da Música': song.processed_data?.nome_musica,
-      'Autor': song.processed_data?.autor,
-      'Letra': song.processed_data?.letra,
-      'Status': song.status,
-    };
-
-    if (song.enriched_data) {
-      base['Compositor'] = song.enriched_data.compositor || '';
-      base['Ano'] = song.enriched_data.ano_lancamento || '';
-      base['Álbum'] = song.enriched_data.album || '';
-      base['Gênero'] = song.enriched_data.genero || '';
-      base['Gravadora'] = song.enriched_data.gravadora || '';
-      base['País'] = song.enriched_data.pais_origem || '';
-    }
-
-    if (includeOriginal) {
-      base['Dados Originais'] = JSON.stringify(song.original_data);
-    }
-
-    return base;
+  const handleExportCSV = (options: ExportOptions) => {
+    const delimiter = options.delimiter;
+    const BOM = options.encoding === 'utf8-bom' ? '\uFEFF' : '';
+    
+    // CSV Header
+    const header = `Título da Música${delimiter}Nome do Artista${delimiter}Nome do Compositor${delimiter}Ano de Lançamento${delimiter}Status do Processamento\n`;
+    
+    // CSV Rows
+    const rows = enrichedData.map(item => {
+      return `${item.titulo_original}${delimiter}${item.artista_encontrado}${delimiter}${item.compositor_encontrado}${delimiter}${item.ano_lancamento}${delimiter}${item.status_pesquisa}`;
+    }).join('\n');
+    
+    const csvContent = BOM + header + rows;
+    
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'musicas_enriquecidas.csv';
+    link.click();
+    
+    toast.success("CSV exportado com sucesso!");
   };
 
   const handleReset = () => {
-    setMusicData([]);
-    setCleaningStats(null);
+    setExtractionResults(null);
+    setEnrichedData([]);
     setCurrentStep('upload');
     setSelectedFiles([]);
     toast.success("Dados resetados!");
@@ -278,21 +180,20 @@ const Index = () => {
             <Database className="w-6 h-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-3xl font-bold">Sistema de Processamento de Dados Musicais</h1>
+            <h1 className="text-3xl font-bold">Sistema de Enriquecimento de Dados Musicais</h1>
             <p className="text-muted-foreground">
-              Limpeza, enriquecimento via IA e validação de dados musicais
+              Extração automática, enriquecimento via IA e exportação CSV
             </p>
           </div>
         </div>
 
         <ProcessingPipeline currentStep={currentStep} />
 
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
-          <StatsCard title="Total" value={stats.total} icon={Database} />
-          <StatsCard title="Pendentes" value={stats.pending} icon={AlertCircle} variant="warning" />
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+          <StatsCard title="Títulos Encontrados" value={stats.titlesFound} icon={FileText} />
+          <StatsCard title="Títulos Únicos" value={stats.titlesClean} icon={CheckCircle} variant="success" />
           <StatsCard title="Enriquecidos" value={stats.enriched} icon={Sparkles} variant="enriched" />
-          <StatsCard title="Validados" value={stats.validated} icon={CheckCircle} variant="success" />
-          <StatsCard title="Rejeitados" value={stats.rejected} icon={XCircle} variant="destructive" />
+          <StatsCard title="Falhas" value={stats.failed} icon={Database} variant="destructive" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
@@ -301,38 +202,39 @@ const Index = () => {
               <>
                 <FileUpload
                   onFilesSelect={handleFilesSelect}
-                  isProcessing={isProcessing}
+                  isProcessing={isExtracting}
                   selectedFiles={selectedFiles}
                   onRemoveFile={handleRemoveFile}
                 />
                 
                 {selectedFiles.length > 0 && (
                   <div className="flex justify-end">
-                    <Button onClick={handleProcessFiles} disabled={isProcessing} size="lg">
-                      {isProcessing ? "Processando..." : `Processar ${selectedFiles.length} Arquivo(s)`}
+                    <Button onClick={handleExtractTitles} disabled={isExtracting} size="lg">
+                      {isExtracting ? "Extraindo..." : `Extrair Títulos de ${selectedFiles.length} Arquivo(s)`}
                     </Button>
                   </div>
                 )}
               </>
             )}
 
-            {currentStep === 'process' && isProcessing && (
+            {currentStep === 'extract' && isExtracting && (
               <div className="text-center py-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-                <p className="text-muted-foreground">Processando e limpando dados...</p>
+                <p className="text-muted-foreground">Detectando colunas e extraindo títulos...</p>
               </div>
             )}
 
-            {currentStep === 'enrich' && !isEnriching && cleaningStats && (
+            {currentStep === 'enrich' && !isEnriching && extractionResults && (
               <>
-                <CleaningResults stats={cleaningStats} />
-                <div className="flex gap-3">
-                  <Button onClick={handleDownloadProcessed} variant="outline" className="flex-1">
-                    Baixar Dados Processados
-                  </Button>
-                  <Button onClick={handleEnrichData} className="flex-1">
+                <TitleExtractionResults
+                  rawCount={extractionResults.rawCount}
+                  cleanCount={extractionResults.cleanCount}
+                  detectionResults={extractionResults.detectionResults}
+                />
+                <div className="flex justify-end">
+                  <Button onClick={handleEnrichData} size="lg">
                     <Sparkles className="w-4 h-4 mr-2" />
-                    Enviar para Enriquecimento IA
+                    Buscar Metadados com IA ({extractionResults.cleanCount} músicas)
                   </Button>
                 </div>
               </>
@@ -346,35 +248,33 @@ const Index = () => {
               />
             )}
 
-            {(currentStep === 'validate' || currentStep === 'export') && (
+            {(currentStep === 'validate' || currentStep === 'export') && enrichedData.length > 0 && (
               <ValidationTable
-                data={musicData}
-                onValidate={handleValidate}
-                onReject={handleReject}
-                onEdit={handleEdit}
+                data={enrichedData}
               />
             )}
           </div>
 
           <div className="space-y-4">
-            {musicData.length > 0 && (
+            {enrichedData.length > 0 && (
               <>
                 <Button
                   className="w-full"
+                  size="lg"
                   onClick={() => {
                     setCurrentStep('export');
                     setExportDialogOpen(true);
                   }}
-                  disabled={musicData.filter(d => d.status === 'validated').length === 0}
                 >
-                  Exportar Dados Finais
+                  <Download className="w-4 h-4 mr-2" />
+                  Exportar CSV
                 </Button>
                 <Button
                   className="w-full"
-                  variant="destructive"
+                  variant="outline"
                   onClick={handleReset}
                 >
-                  Reset Completo
+                  Recomeçar
                 </Button>
               </>
             )}
@@ -385,7 +285,7 @@ const Index = () => {
       <ExportDialog
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
-        onExport={handleExport}
+        onExport={handleExportCSV}
       />
     </div>
   );
