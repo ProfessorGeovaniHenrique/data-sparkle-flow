@@ -1,1 +1,7 @@
 project_id = "leyjlzjqgyodwftnrvfc"
+
+[functions.process-music-data]
+verify_jwt = false
+
+[functions.enrich-music-data]
+verify_jwt = false
