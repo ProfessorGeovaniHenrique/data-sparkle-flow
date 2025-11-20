@@ -45,6 +45,40 @@ function cleanTitle(raw: string): string {
   return cleaned;
 }
 
+// Helper: retorna o valor mais longo (ou o primeiro se ambos vazios)
+function chooseLonger(a?: string, b?: string): string | undefined {
+  if (!a && !b) return undefined;
+  if (!a) return b;
+  if (!b) return a;
+  return a.length >= b.length ? a : b;
+}
+
+// Consolida músicas duplicadas (mesmo título + artista)
+function consolidateDuplicates(musics: ParsedMusic[]): ParsedMusic[] {
+  // Cria um Map usando chave composta (titulo + artista, case-insensitive)
+  const musicMap = new Map<string, ParsedMusic>();
+  
+  musics.forEach(music => {
+    const key = `${music.titulo.toLowerCase().trim()}|||${(music.artista || '').toLowerCase().trim()}`;
+    
+    if (!musicMap.has(key)) {
+      // Primeira ocorrência: adiciona ao Map
+      musicMap.set(key, { ...music });
+    } else {
+      // Duplicata encontrada: consolidar campos
+      const existing = musicMap.get(key)!;
+      
+      // Regra: prioriza o valor mais longo/completo
+      existing.compositor = chooseLonger(existing.compositor, music.compositor);
+      existing.ano = chooseLonger(existing.ano, music.ano);
+      existing.artista = chooseLonger(existing.artista, music.artista);
+      // Mantém o titulo, fonte e id originais
+    }
+  });
+  
+  return Array.from(musicMap.values());
+}
+
 export async function parseExcelFile(file: File): Promise<ParseResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -157,9 +191,13 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           }
         }
 
-        // Log de debug: Dados extraídos
+        // Log de debug: Dados extraídos (ANTES da consolidação)
         console.log('[Parser] Dados extraídos:', extractedData.length, 'músicas');
         console.log('[Parser] Primeiras 3 músicas:', extractedData.slice(0, 3));
+
+        // Consolidar duplicatas
+        const consolidatedData = consolidateDuplicates(extractedData);
+        console.log('[Parser] Após consolidação:', consolidatedData.length, 'músicas únicas');
 
         // Calcula confiança da detecção
         const detectionConfidence: 'high' | 'low' = 
@@ -167,8 +205,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
 
         resolve({
           filename: file.name,
-          totalRows: extractedData.length,
-          extractedData: extractedData,
+          totalRows: consolidatedData.length,
+          extractedData: consolidatedData,
           columnsDetected: {
             musica: true,
             artista: isAlternatingFormat ? true : (columnIndices.artista !== undefined),
@@ -271,14 +309,18 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
           }
         }
 
-        // Log de debug: Dados extraídos após mapeamento
+        // Log de debug: Dados extraídos após mapeamento (ANTES da consolidação)
         console.log('[Parser] Dados extraídos após mapeamento:', extractedData.length, 'músicas');
         console.log('[Parser] Primeiras 3 músicas:', extractedData.slice(0, 3));
 
+        // Consolidar duplicatas
+        const consolidatedData = consolidateDuplicates(extractedData);
+        console.log('[Parser] Após consolidação:', consolidatedData.length, 'músicas únicas');
+
         resolve({
           filename: file.name,
-          totalRows: extractedData.length,
-          extractedData: extractedData,
+          totalRows: consolidatedData.length,
+          extractedData: consolidatedData,
           columnsDetected: {
             musica: true,
             artista: map.artistaIndex >= 0,
