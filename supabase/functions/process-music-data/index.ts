@@ -20,12 +20,49 @@ serve(async (req) => {
     let duplicatesRemoved = 0;
     
     for (const row of data) {
-      const songName = cleanString(row.nome_musica || row['Nome da Música'] || row.name || '');
-      const author = cleanString(row.autor || row.Autor || row.artist || '');
+      // Map various possible field names to standard fields
+      const songName = cleanString(
+        row['Letras das musicas'] || 
+        row.nome_musica || 
+        row['Nome da Música'] || 
+        row.name || 
+        row.Música || 
+        ''
+      );
+      
+      const author = cleanString(
+        row.artistas || 
+        row.autor || 
+        row.Autor || 
+        row.artist || 
+        row.Artista || 
+        ''
+      );
+      
+      // Check if Música field contains lyrics (longer text) or song name
+      const musicaField = row.Música || '';
+      let letra = '';
+      
+      // If Música field is long (>100 chars), it's probably the lyrics
+      if (musicaField.length > 100) {
+        letra = musicaField;
+      } else if (musicaField && !songName) {
+        // If short and no song name found elsewhere, it's the song name
+        const altSongName = cleanString(musicaField);
+        const key = `${altSongName.toLowerCase()}_${author.toLowerCase()}`;
+        
+        if (!uniqueMap.has(key) && altSongName && author) {
+          uniqueMap.set(key, { ...row, nome_musica: altSongName, autor: author });
+        } else {
+          duplicatesRemoved++;
+        }
+        continue;
+      }
+      
       const key = `${songName.toLowerCase()}_${author.toLowerCase()}`;
       
       if (!uniqueMap.has(key) && songName && author) {
-        uniqueMap.set(key, { ...row, nome_musica: songName, autor: author });
+        uniqueMap.set(key, { ...row, nome_musica: songName, autor: author, letra_temp: letra });
       } else {
         duplicatesRemoved++;
       }
@@ -37,11 +74,17 @@ serve(async (req) => {
     let noiseCleaned = 0;
     
     for (const [_, row] of uniqueMap) {
-      const letra = row.letra || row.Letra || row.lyrics || '';
+      // Get letra from various possible fields
+      let letra = row.letra_temp || row.letra || row.Letra || row.lyrics || row.Música || '';
+      
+      // If letra is empty but Música field exists and is long, use it
+      if (!letra && row.Música && row.Música.length > 100) {
+        letra = row.Música;
+      }
       
       // Remove links
       const originalLetra = letra;
-      const cleanedLetra = removeLinks(letra);
+      const cleanedLetra = removeLinks(String(letra));
       if (originalLetra !== cleanedLetra) linksRemoved++;
       
       // Remove noise
