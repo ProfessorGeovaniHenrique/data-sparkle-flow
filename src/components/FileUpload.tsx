@@ -2,11 +2,12 @@ import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
-import { parseExcelFile, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult } from '@/lib/excelParser';
+import { parseExcelFile, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult, cleanScraperData } from '@/lib/excelParser';
 import { deduplicateMusicData } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import ColumnMapper, { ColumnMap } from '@/components/ColumnMapper';
+import { ProcessingLog } from '@/components/ProcessingLog';
 
 interface FileUploadProps {
   onFilesSelect: (files: File[], parsedData: ParseResult[]) => void;
@@ -28,12 +29,17 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     duplicatesRemoved: number;
     uniqueCount: number;
   } | null>(null);
+  
+  // Estado para logs de processamento
+  const [processingLogs, setProcessingLogs] = useState<string[]>([]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
     setIsParsing(true);
     setRawFiles(acceptedFiles);
+    clearLogs();
+    addLog(`📁 ${acceptedFiles.length} arquivo(s) selecionado(s).`);
     const results: ParseResult[] = [];
     let hasError = false;
 
@@ -102,6 +108,7 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     setRawFiles([]);
     setNeedsMapping(false);
     setRawParseData(null);
+    clearLogs();
     toast.info("Seleção de arquivos cancelada.");
   };
 
@@ -138,17 +145,42 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     toast.info("Mapeamento cancelado.");
   };
 
+  const addLog = (message: string) => {
+    setProcessingLogs(prev => [...prev, message]);
+  };
+
+  const clearLogs = () => {
+    setProcessingLogs([]);
+  };
+
   const checkForDuplicates = (results: ParseResult[]) => {
-    // Concatena todos os dados extraídos de todos os arquivos
-    const allMusic = results.flatMap(r => r.extractedData);
+    addLog('Iniciando verificação de duplicatas...');
     
-    // Roda deduplicação
+    // Concatena todos os dados extraídos de todos os arquivos
+    let allMusic = results.flatMap(r => r.extractedData);
+    addLog(`Total de ${allMusic.length} linhas lidas.`);
+    
+    // ETAPA 1: Limpeza de scraper (fusão de linhas consecutivas)
+    addLog('Executando limpeza de scraper (fusão de duplicatas consecutivas)...');
+    allMusic = cleanScraperData(allMusic, addLog);
+    
+    // ETAPA 2: Deduplicação global
+    addLog('Executando deduplicação global...');
     const dedupeResult = deduplicateMusicData(allMusic);
     
     if (dedupeResult.duplicatesRemoved > 0) {
       // Duplicatas encontradas: mostra preview de limpeza
       console.log('[FileUpload] Duplicatas detectadas:', dedupeResult.duplicatesRemoved);
-      setPreDedupeData(results);
+      addLog(`⚠️ ${dedupeResult.duplicatesRemoved} duplicatas adicionais encontradas.`);
+      
+      // Atualiza results com dados limpos
+      const cleanedResult: ParseResult = {
+        ...results[0],
+        totalRows: allMusic.length,
+        extractedData: allMusic
+      };
+      
+      setPreDedupeData([cleanedResult]);
       setDeduplicationStats({
         totalOriginal: dedupeResult.totalOriginal,
         duplicatesRemoved: dedupeResult.duplicatesRemoved,
@@ -159,8 +191,18 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     } else {
       // Sem duplicatas: segue fluxo normal
       console.log('[FileUpload] Nenhuma duplicata encontrada');
-      setParseResults(results);
-      toast.success("Nenhuma duplicata encontrada. Pronto para processar!");
+      addLog('✓ Nenhuma duplicata adicional encontrada.');
+      addLog(`Processamento concluído! ${allMusic.length} músicas únicas prontas.`);
+      
+      // Atualiza results com dados limpos do scraper
+      const cleanedResult: ParseResult = {
+        ...results[0],
+        totalRows: allMusic.length,
+        extractedData: allMusic
+      };
+      
+      setParseResults([cleanedResult]);
+      toast.success("Limpeza concluída! Pronto para processar.");
     }
   };
 
@@ -347,35 +389,40 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
   }
 
   return (
-    <div
-      {...getRootProps()}
-      className={`
-        w-full p-12 border-2 border-dashed rounded-xl text-center cursor-pointer
-        transition-all duration-300 ease-in-out
-        ${isDragActive ? 'border-primary bg-primary/5 scale-[0.99]' : 'border-border hover:border-primary/50 hover:bg-muted/20'}
-        ${(isProcessing || isParsing) ? 'opacity-50 cursor-not-allowed' : ''}
-      `}
-    >
-      <input {...getInputProps()} />
-      <div className="flex flex-col items-center gap-4">
-        <div className={`p-4 rounded-full bg-primary/10 transition-transform duration-300 ${isDragActive ? 'scale-110' : ''}`}>
-          {isParsing ? (
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          ) : (
-            <Upload className="w-8 h-8 text-primary" />
-          )}
-        </div>
-        <div>
-          <h3 className="text-lg font-semibold mb-1">
-            {isParsing ? "Lendo arquivos..." : "Arraste suas planilhas aqui"}
-          </h3>
-          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-            {isParsing
-              ? "Processando dados no seu navegador, aguarde..."
-              : "Ou clique para selecionar arquivos .xlsx ou .xls. O processamento inicial é feito no seu computador."}
-          </p>
+    <>
+      <div
+        {...getRootProps()}
+        className={`
+          w-full p-12 border-2 border-dashed rounded-xl text-center cursor-pointer
+          transition-all duration-300 ease-in-out
+          ${isDragActive ? 'border-primary bg-primary/5 scale-[0.99]' : 'border-border hover:border-primary/50 hover:bg-muted/20'}
+          ${(isProcessing || isParsing) ? 'opacity-50 cursor-not-allowed' : ''}
+        `}
+      >
+        <input {...getInputProps()} />
+        <div className="flex flex-col items-center gap-4">
+          <div className={`p-4 rounded-full bg-primary/10 transition-transform duration-300 ${isDragActive ? 'scale-110' : ''}`}>
+            {isParsing ? (
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            ) : (
+              <Upload className="w-8 h-8 text-primary" />
+            )}
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold mb-1">
+              {isParsing ? "Lendo arquivos..." : "Arraste suas planilhas aqui"}
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              {isParsing
+                ? "Processando dados no seu navegador, aguarde..."
+                : "Ou clique para selecionar arquivos .xlsx ou .xls. O processamento inicial é feito no seu computador."}
+            </p>
+          </div>
         </div>
       </div>
-    </div>
+      
+      {/* Terminal de Logs */}
+      <ProcessingLog logs={processingLogs} title="Log de Processamento" />
+    </>
   );
 };

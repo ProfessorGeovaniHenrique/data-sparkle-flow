@@ -79,6 +79,78 @@ function consolidateDuplicates(musics: ParsedMusic[]): ParsedMusic[] {
   return Array.from(musicMap.values());
 }
 
+/**
+ * Limpa dados de scraper fundindo linhas consecutivas duplicadas
+ * Resolve o caso específico onde uma linha tem metadados e a próxima tem metadados + letra
+ */
+export function cleanScraperData(
+  data: ParsedMusic[], 
+  logger?: (msg: string) => void
+): ParsedMusic[] {
+  const log = logger || (() => {});
+  
+  if (data.length === 0) return data;
+  
+  log(`Iniciando limpeza de scraper em ${data.length} linhas...`);
+  
+  // Normaliza string para comparação (remove acentos, lowercase, trim)
+  const normalize = (str: string) => 
+    str.toLowerCase()
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  
+  // Ordena por título + artista para agrupar duplicatas consecutivas
+  const sorted = [...data].sort((a, b) => {
+    const titleCompare = normalize(a.titulo).localeCompare(normalize(b.titulo));
+    if (titleCompare !== 0) return titleCompare;
+    return normalize(a.artista || '').localeCompare(normalize(b.artista || ''));
+  });
+  
+  log(`Ordenação concluída. Analisando duplicatas...`);
+  
+  const cleaned: ParsedMusic[] = [];
+  let mergedCount = 0;
+  let i = 0;
+  
+  while (i < sorted.length) {
+    const current = sorted[i];
+    const next = sorted[i + 1];
+    
+    // Verifica se há um próximo item e se é uma duplicata
+    if (next && 
+        normalize(current.titulo) === normalize(next.titulo) &&
+        normalize(current.artista || '') === normalize(next.artista || '')) {
+      
+      // Funde os dois itens, pegando o melhor de cada
+      const merged: ParsedMusic = {
+        id: current.id,
+        titulo: current.titulo || next.titulo,
+        artista: chooseLonger(current.artista, next.artista),
+        compositor: chooseLonger(current.compositor, next.compositor),
+        ano: chooseLonger(current.ano, next.ano),
+        fonte: current.fonte,
+      };
+      
+      cleaned.push(merged);
+      mergedCount++;
+      log(`✓ Mesclando duplicata: "${current.titulo}" - ${current.artista || 'Sem artista'}`);
+      
+      // Pula o próximo item pois já foi fundido
+      i += 2;
+    } else {
+      // Não é duplicata, mantém o item
+      cleaned.push(current);
+      i++;
+    }
+  }
+  
+  log(`Limpeza concluída! ${mergedCount} duplicatas mescladas.`);
+  log(`De ${data.length} linhas originais → ${cleaned.length} músicas únicas.`);
+  
+  return cleaned;
+}
+
 export async function parseExcelFile(file: File): Promise<ParseResult> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
