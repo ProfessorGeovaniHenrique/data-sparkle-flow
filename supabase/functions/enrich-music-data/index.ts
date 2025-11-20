@@ -50,7 +50,7 @@ serve(async (req) => {
       
       try {
         const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista);
-        const validatedData = validateAndNormalizeMusicData({
+        let validatedData = validateAndNormalizeMusicData({
           id: music.id,
           titulo_original: music.titulo,
           artista: metadata.artista,
@@ -58,6 +58,44 @@ serve(async (req) => {
           ano: metadata.ano,
           observacoes: metadata.observacoes
         });
+        
+        // Verificar se precisa de pesquisa web (fallback)
+        const needsWebResearch = 
+          validatedData.status_pesquisa === 'Não Encontrado' ||
+          validatedData.compositor_encontrado === 'Não Identificado' ||
+          validatedData.compositor_encontrado === '' ||
+          validatedData.ano_lancamento === '0000';
+        
+        if (needsWebResearch) {
+          console.log(`Acionando fallback de pesquisa web para: ${music.titulo}`);
+          try {
+            const webData = await searchWithPerplexity(music.titulo, music.artista);
+            
+            // Mesclar dados da web com dados existentes
+            if (webData.compositor && webData.compositor !== 'Não Identificado') {
+              validatedData.compositor_encontrado = webData.compositor;
+            }
+            if (webData.ano && webData.ano !== '0000') {
+              validatedData.ano_lancamento = webData.ano;
+            }
+            
+            // Atualizar status e observações
+            if (webData.compositor !== 'Não Identificado' || webData.ano !== '0000') {
+              validatedData.status_pesquisa = 'Sucesso (Web)';
+              validatedData.enriched_by_web = true;
+              const webNote = webData.fonte ? ` Fonte: ${webData.fonte}` : '';
+              validatedData.observacoes = validatedData.observacoes 
+                ? `${validatedData.observacoes}. Dados encontrados via pesquisa web.${webNote}`
+                : `Dados encontrados via pesquisa web.${webNote}`;
+            }
+            
+            console.log(`Pesquisa web concluída para: ${music.titulo}. Sucesso: ${webData.compositor !== 'Não Identificado' || webData.ano !== '0000'}`);
+          } catch (webError) {
+            console.error(`Falha na pesquisa web para "${music.titulo}":`, webError);
+            // Continua com os dados originais se a pesquisa web falhar
+          }
+        }
+        
         enrichedData.push(validatedData);
       } catch (error) {
         console.error(`Error enriching title "${music.titulo}":`, error);
@@ -253,6 +291,91 @@ function validateYear(year: any): string {
   return '0000';
 }
 
+async function searchWithPerplexity(titulo: string, artista?: string): Promise<{ compositor: string; ano: string; fonte?: string }> {
+  const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY');
+  if (!PERPLEXITY_API_KEY) {
+    console.warn('PERPLEXITY_API_KEY não configurada. Pulando pesquisa web.');
+    return { compositor: 'Não Identificado', ano: '0000' };
+  }
+
+  const artistaInfo = artista ? ` do artista "${artista}"` : '';
+  const searchPrompt = `Pesquise na web informações precisas sobre a música "${titulo}"${artistaInfo}. 
+  
+Preciso encontrar:
+1. O compositor (ou compositores) ORIGINAL(is) da música
+2. O ano de lançamento ORIGINAL da música
+
+IMPORTANTE:
+- Se for um cover/regravação, quero os dados da versão ORIGINAL
+- Retorne APENAS informações verificáveis
+- Se não encontrar, retorne "Não Identificado" para compositor e "0000" para ano
+- Foque em música brasileira, especialmente forró, piseiro, sertanejo
+
+Retorne APENAS um JSON válido com esta estrutura exata:
+{
+  "compositor": "Nome do Compositor",
+  "ano": "YYYY",
+  "fonte": "Nome da fonte onde encontrou (ex: Wikipedia, Dicionário Cravo Albin)"
+}`;
+
+  try {
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-sonar-large-128k-online',
+        messages: [
+          {
+            role: 'system',
+            content: 'Você é um pesquisador musical especialista em música brasileira. Retorne APENAS JSON válido, sem texto adicional.'
+          },
+          {
+            role: 'user',
+            content: searchPrompt
+          }
+        ],
+        temperature: 0.2,
+        max_tokens: 500
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Perplexity API error:', response.status, errorText);
+      return { compositor: 'Não Identificado', ano: '0000' };
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      console.warn('Nenhum conteúdo retornado pela Perplexity');
+      return { compositor: 'Não Identificado', ano: '0000' };
+    }
+
+    // Tentar extrair JSON da resposta
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsedData = JSON.parse(jsonMatch[0]);
+      return {
+        compositor: parsedData.compositor || 'Não Identificado',
+        ano: validateYear(parsedData.ano),
+        fonte: parsedData.fonte
+      };
+    }
+
+    console.warn('Não foi possível extrair JSON da resposta da Perplexity:', content);
+    return { compositor: 'Não Identificado', ano: '0000' };
+
+  } catch (error) {
+    console.error('Erro na pesquisa com Perplexity:', error);
+    return { compositor: 'Não Identificado', ano: '0000' };
+  }
+}
+
 function validateAndNormalizeMusicData(data: any): any {
   const normalized = {
     id: data.id,
@@ -261,7 +384,8 @@ function validateAndNormalizeMusicData(data: any): any {
     compositor_encontrado: data.compositor || 'Não Identificado',
     ano_lancamento: validateYear(data.ano),
     status_pesquisa: 'Sucesso',
-    observacoes: data.observacoes || ''
+    observacoes: data.observacoes || '',
+    enriched_by_web: false
   };
 
   // Normaliza artista
