@@ -140,6 +140,13 @@ const Index = () => {
     }
   };
 
+  const handleUpdateItem = (index: number, updatedItem: EnrichedMusicItem) => {
+    const newData = [...enrichedData];
+    newData[index] = updatedItem;
+    setEnrichedData(newData);
+    toast.success("Dados atualizados!");
+  };
+
   const handleExportCSV = (options: ExportOptions) => {
     const delimiter = options.delimiter;
     const BOM = options.encoding === 'utf8-bom' ? '\uFEFF' : '';
@@ -251,6 +258,7 @@ const Index = () => {
             {(currentStep === 'validate' || currentStep === 'export') && enrichedData.length > 0 && (
               <ValidationTable
                 data={enrichedData}
+                onUpdate={handleUpdateItem}
               />
             )}
           </div>
