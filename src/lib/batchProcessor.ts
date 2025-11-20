@@ -34,6 +34,10 @@ export class BatchProcessor {
     this.batchSize = batchSize;
     this.processBatch = processBatch;
     this.context = context;
+    
+    // Log de debug: BatchProcessor criado
+    console.log('[BatchProcessor] Criado com', items.length, 'items');
+    console.log('[BatchProcessor] Primeiros 3 items:', items.slice(0, 3));
   }
 
   private async processWithRetry(batch: ParsedMusic[], batchNumber: number): Promise<EnrichedMusicData[]> {

@@ -44,8 +44,15 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
             return; // Para aqui e mostra o mapper
           } else {
             // Alta confiança: prossegue normalmente
-            results.push(result);
-            toast.success(`${file.name}: ${result.totalRows} músicas encontradas.`);
+            
+            // Validação: se nenhum dado foi extraído
+            if (result.extractedData.length === 0) {
+              toast.error(`${file.name}: Nenhuma música foi extraída. Verifique o formato do arquivo.`);
+              hasError = true;
+            } else {
+              results.push(result);
+              toast.success(`${file.name}: ${result.totalRows} músicas encontradas.`);
+            }
           }
         } catch (error: any) {
           console.error(`Erro ao ler ${file.name}:`, error);
@@ -93,6 +100,16 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     try {
       toast.info("Aplicando mapeamento...");
       const result = await extractDataFromMap(rawFiles[0], map);
+      
+      // Log de debug: Resultado do mapeamento
+      console.log('[FileUpload] Resultado do mapeamento:', result.extractedData.length, 'músicas');
+      
+      // Validação: se nenhum dado foi extraído
+      if (result.extractedData.length === 0) {
+        toast.error("Nenhuma música foi extraída do arquivo. Verifique o formato e o mapeamento.");
+        return;
+      }
+      
       setParseResults([result]);
       setNeedsMapping(false);
       setRawParseData(null);

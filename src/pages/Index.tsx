@@ -31,6 +31,9 @@ const IndexContent = () => {
 
   const handleFilesSelected = useCallback((rawFiles: File[], parsedResults: ParseResult[]) => {
     const allMusics = parsedResults.flatMap(result => result.extractedData);
+    
+    // Log de debug: Músicas após flatMap
+    console.log('[Index] Músicas após flatMap:', allMusics.length);
 
     if (allMusics.length === 0) {
       toast.error("Nenhuma música válida foi encontrada nos arquivos selecionados.");
@@ -43,6 +46,9 @@ const IndexContent = () => {
         (t.artista || '').toLowerCase() === (music.artista || '').toLowerCase()
       ))
     );
+    
+    // Log de debug: Músicas únicas após filtro
+    console.log('[Index] Músicas únicas:', uniqueMusics.length);
 
     processingContext.setSelectedTitles(uniqueMusics.map(m => m.titulo));
     toast.success(`${uniqueMusics.length} músicas únicas prontas para processamento.`);
@@ -50,6 +56,10 @@ const IndexContent = () => {
   }, [processingContext]);
 
   const startBatchProcessing = async (musicsToProcess: ParsedMusic[]) => {
+    // Log de debug: Músicas recebidas para processamento
+    console.log('[Index] Iniciando startBatchProcessing com:', musicsToProcess.length, 'músicas');
+    console.log('[Index] Primeiras 3 músicas:', musicsToProcess.slice(0, 3));
+    
     processingContext.reset();
 
     const processBatchFn = async (batch: ParsedMusic[]): Promise<EnrichedMusicData[]> => {
@@ -69,6 +79,9 @@ const IndexContent = () => {
 
       return data.results as EnrichedMusicData[];
     };
+
+    // Log de debug: Antes de criar BatchProcessor
+    console.log('[Index] Criando BatchProcessor com:', musicsToProcess.length, 'items');
 
     processorRef.current = new BatchProcessor(
       musicsToProcess,
