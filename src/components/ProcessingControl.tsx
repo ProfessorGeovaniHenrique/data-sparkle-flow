@@ -1,12 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Pause, Play, X, Clock, Zap, CheckCircle2, AlertCircle, XCircle, FileMusic } from "lucide-react";
+import { Pause, Play, X, Clock, Zap, CheckCircle2, AlertCircle, XCircle, FileMusic, Loader2 } from "lucide-react";
 import { useProcessing } from "@/contexts/ProcessingContext";
 import { useMemo } from "react";
 
 export const ProcessingControl = () => {
-  const { status, canPause, canCancel, progress, results, pause, resume, cancel } = useProcessing();
+  const { status, canPause, canCancel, progress, results, errors, pause, resume, cancel } = useProcessing();
 
   if (status === 'idle' || status === 'completed') return null;
 
@@ -132,6 +132,15 @@ export const ProcessingControl = () => {
                 <span className="font-semibold text-orange-600">{statusStats.naoEncontrado}</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {errors.length > 0 && errors.some(e => e.message.includes('Tentativa')) && (
+          <div className="bg-blue-500/10 border border-blue-500/50 rounded-lg p-3 text-sm flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+            <span className="text-blue-700 dark:text-blue-400">
+              Reconectando após falha temporária...
+            </span>
           </div>
         )}
 
