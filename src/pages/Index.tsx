@@ -61,14 +61,21 @@ const IndexContent = () => {
     }
   }, [enrichedData, processing.progress.current]);
 
-  const handleFilesSelect = (files: File[]) => {
-    setSelectedFiles(prev => [...prev, ...files]);
-    toast.success(`${files.length} arquivo(s) adicionado(s)`);
-  };
-
-  const handleRemoveFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-    toast.info("Arquivo removido");
+  const handleFilesSelect = (files: File[], parsedData: any[]) => {
+    setSelectedFiles(files);
+    // Store parsed data for later use
+    const allTitles = parsedData.flatMap(result => result.extractedData);
+    setExtractionResults({
+      extractedTitles: allTitles,
+      stats: {
+        totalTitles: allTitles.length,
+        uniqueTitles: new Set(allTitles.map((t: any) => t.titulo)).size
+      },
+      files: parsedData.map(r => ({ name: r.filename, rows: r.totalRows }))
+    });
+    toast.success(`${allTitles.length} músicas extraídas de ${files.length} arquivo(s)`);
+    setCurrentStep('enrich');
+    processing.setSelectedTitles(allTitles.map((t: any) => t.titulo));
   };
 
   const handleExtractTitles = async () => {
@@ -312,22 +319,10 @@ const IndexContent = () => {
           
           <div className="lg:col-span-2 space-y-6">
             {currentStep === 'upload' && (
-              <>
-                <FileUpload
-                  onFilesSelect={handleFilesSelect}
-                  isProcessing={isExtracting}
-                  selectedFiles={selectedFiles}
-                  onRemoveFile={handleRemoveFile}
-                />
-                
-                {selectedFiles.length > 0 && (
-                  <div className="flex justify-end">
-                    <Button onClick={handleExtractTitles} disabled={isExtracting} size="lg">
-                      {isExtracting ? "Extraindo..." : `Extrair Títulos de ${selectedFiles.length} Arquivo(s)`}
-                    </Button>
-                  </div>
-                )}
-              </>
+              <FileUpload
+                onFilesSelect={handleFilesSelect}
+                isProcessing={isExtracting}
+              />
             )}
 
             {currentStep === 'extract' && isExtracting && (
