@@ -245,22 +245,41 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           }
 
         } else {
-          // FORMATO TABULAR ORIGINAL (mantém lógica existente)
+          // FORMATO TABULAR COM FILL DOWN
+          let lastSeenArtista: string | undefined = undefined;
+          let lastSeenCompositor: string | undefined = undefined;
+
           for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
             const row = jsonData[i];
             const rawTitle = row[columnIndices.musica];
 
             if (rawTitle && typeof rawTitle === 'string' && rawTitle.trim().length > 1) {
+              // Lógica de Fill Down para Artista
+              const rawArtista = columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined;
+              if (rawArtista && String(rawArtista).trim().length > 0) {
+                lastSeenArtista = String(rawArtista).trim();
+              }
+              // Se célula vazia, mantém lastSeenArtista (não atualiza)
+
+              // Lógica de Fill Down para Compositor
+              const rawCompositor = columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined;
+              if (rawCompositor && String(rawCompositor).trim().length > 0) {
+                lastSeenCompositor = String(rawCompositor).trim();
+              }
+
               extractedData.push({
                 id: `${file.name}-${i}`,
                 titulo: cleanTitle(rawTitle),
-                artista: columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined,
-                compositor: columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined,
+                artista: lastSeenArtista, // Usa o último artista visto
+                compositor: lastSeenCompositor, // Usa o último compositor visto
                 ano: columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined,
                 fonte: file.name
               });
             }
           }
+
+          // Log adicional para debugging
+          console.log('[Parser] Fill Down aplicado. Último artista:', lastSeenArtista);
         }
 
         // Log de debug: Dados extraídos (ANTES da consolidação)
@@ -359,20 +378,32 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
         const extractedData: ParsedMusic[] = [];
         const startIndex = map.hasHeader ? 1 : 0;
 
+        let lastSeenArtista: string | undefined = undefined;
+        let lastSeenCompositor: string | undefined = undefined;
+
         for (let i = startIndex; i < jsonData.length; i++) {
           const row = jsonData[i];
           // Garante que a linha tem dados na coluna de título
           const tituloRaw = row[map.tituloIndex];
           if (tituloRaw && String(tituloRaw).trim().length > 1) {
+            // Lógica de Fill Down para Artista
+            const rawArtista = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
+            if (rawArtista && String(rawArtista).trim().length > 0) {
+              lastSeenArtista = String(rawArtista).trim();
+            }
+            // Se célula vazia, mantém lastSeenArtista
+
+            // Lógica de Fill Down para Compositor
+            const rawCompositor = map.compositorIndex >= 0 ? row[map.compositorIndex] : undefined;
+            if (rawCompositor && String(rawCompositor).trim().length > 0) {
+              lastSeenCompositor = String(rawCompositor).trim();
+            }
+
             extractedData.push({
               id: `${file.name}-${i}`,
               titulo: cleanTitle(String(tituloRaw)),
-              artista: map.artistaIndex >= 0 && row[map.artistaIndex] 
-                ? String(row[map.artistaIndex]) 
-                : undefined,
-              compositor: map.compositorIndex >= 0 && row[map.compositorIndex]
-                ? String(row[map.compositorIndex])
-                : undefined,
+              artista: lastSeenArtista, // Usa o último artista visto
+              compositor: lastSeenCompositor, // Usa o último compositor visto
               ano: map.anoIndex >= 0 && row[map.anoIndex]
                 ? String(row[map.anoIndex])
                 : undefined,
@@ -380,6 +411,9 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
             });
           }
         }
+
+        // Log adicional para debugging
+        console.log('[Parser] Fill Down (manual map) aplicado. Artista final:', lastSeenArtista);
 
         // Log de debug: Dados extraídos após mapeamento (ANTES da consolidação)
         console.log('[Parser] Dados extraídos após mapeamento:', extractedData.length, 'músicas');
