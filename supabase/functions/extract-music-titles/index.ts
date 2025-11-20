@@ -18,10 +18,8 @@ Deno.serve(async (req) => {
     const files = formData.getAll('files');
     console.log(`Received ${files.length} files`);
     
-    console.log(`Processing ${files.length} files for title extraction`);
-    
-    const allTitles: string[] = [];
-    const detectionResults: any[] = [];
+    const filesData: any[] = [];
+    const allExtractedData: any[] = [];
     
     for (const file of files) {
       if (!(file instanceof File)) continue;
@@ -29,60 +27,100 @@ Deno.serve(async (req) => {
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: 'array' });
       
+      const sheetsData: any[] = [];
+      
       for (const sheetName of workbook.SheetNames) {
         const worksheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
         
         if (jsonData.length === 0) continue;
         
-        // Find the column with "nome da musica:" pattern
         const headers = jsonData[0] as any[];
-        const columnIndex = findMusicTitleColumn(jsonData);
+        const detectedColumns = detectMusicColumns(jsonData, headers);
         
-        if (columnIndex === -1) {
-          console.log(`No "nome da musica:" pattern found in sheet ${sheetName}`);
+        if (!detectedColumns.musicColumn) {
+          console.log(`No music column found in ${file.name} - ${sheetName}`);
           continue;
         }
         
-        console.log(`Found target column at index ${columnIndex} in sheet ${sheetName}`);
+        console.log(`Detected columns in ${file.name} - ${sheetName}:`, detectedColumns);
         
-        // Extract all values from the target column
-        const extractedTitles: string[] = [];
+        // Extract data from detected columns
+        const extractedItems: any[] = [];
+        const preview: any[] = [];
+        
         for (let i = 1; i < jsonData.length; i++) {
           const row = jsonData[i] as any[];
-          const rawValue = row[columnIndex];
           
-          if (rawValue && typeof rawValue === 'string' && rawValue.trim()) {
-            extractedTitles.push(rawValue);
+          const musica = row[detectedColumns.musicColumn.index];
+          if (!musica || typeof musica !== 'string' || !musica.trim()) continue;
+          
+          const item: any = {
+            titulo: cleanTitle(musica),
+            fonte: file.name
+          };
+          
+          if (detectedColumns.artistColumn) {
+            const artist = row[detectedColumns.artistColumn.index];
+            if (artist && typeof artist === 'string') {
+              item.artista = artist.trim();
+            }
+          }
+          
+          if (detectedColumns.lyricsColumn) {
+            const lyrics = row[detectedColumns.lyricsColumn.index];
+            if (lyrics && typeof lyrics === 'string') {
+              item.letra = lyrics.trim();
+            }
+          }
+          
+          extractedItems.push(item);
+          if (preview.length < 10) {
+            preview.push(item);
           }
         }
         
-        detectionResults.push({
-          file: file.name,
-          sheet: sheetName,
-          columnIndex,
-          columnName: headers[columnIndex],
-          titlesFound: extractedTitles.length
+        sheetsData.push({
+          sheetName,
+          detectedColumns,
+          preview,
+          count: extractedItems.length
         });
         
-        allTitles.push(...extractedTitles);
+        allExtractedData.push(...extractedItems);
       }
+      
+      filesData.push({
+        filename: file.name,
+        sheets: sheetsData
+      });
     }
     
-    // Clean all extracted titles
-    const cleanedTitles = allTitles.map(cleanTitle).filter(t => t.length > 0);
+    // Remove duplicates based on title
+    const uniqueTitles = new Map<string, any>();
+    allExtractedData.forEach(item => {
+      if (!uniqueTitles.has(item.titulo)) {
+        uniqueTitles.set(item.titulo, item);
+      }
+    });
     
-    // Remove duplicates
-    const uniqueTitles = [...new Set(cleanedTitles)];
+    const extractedTitles = Array.from(uniqueTitles.values());
     
-    console.log(`Extraction complete: ${allTitles.length} raw, ${uniqueTitles.length} unique clean titles`);
+    const stats = {
+      totalFiles: filesData.length,
+      totalSheets: filesData.reduce((sum, f) => sum + f.sheets.length, 0),
+      totalTitles: allExtractedData.length,
+      uniqueTitles: extractedTitles.length
+    };
+    
+    console.log(`Extraction complete:`, stats);
     
     return new Response(
       JSON.stringify({
-        rawCount: allTitles.length,
-        cleanCount: uniqueTitles.length,
-        titles: uniqueTitles,
-        detectionResults
+        success: true,
+        files: filesData,
+        extractedTitles,
+        stats
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -107,37 +145,88 @@ Deno.serve(async (req) => {
   }
 });
 
-function findMusicTitleColumn(data: any[][]): number {
-  if (data.length < 2) return -1;
+function detectMusicColumns(data: any[][], headers: any[]) {
+  if (data.length < 2) return {};
   
-  const pattern = /nome\s+da\s+musica:/i;
-  
-  // Check each column
   const numColumns = Math.max(...data.map(row => row.length));
+  const result: any = {};
+  
+  // Patterns for music column
+  const musicPatterns = [
+    /nome\s+da\s+musica:/i,
+    /^m[uú]sica$/i,
+    /^song$/i,
+    /^t[ií]tulo$/i,
+    /^title$/i,
+    /^nome$/i
+  ];
+  
+  // Patterns for artist column
+  const artistPatterns = [
+    /^artista/i,
+    /^artist/i,
+    /^int[eé]rprete/i,
+    /^cantor/i,
+    /^banda$/i
+  ];
+  
+  // Patterns for lyrics column
+  const lyricsPatterns = [
+    /letra/i,
+    /lyrics/i,
+    /texto/i
+  ];
   
   for (let colIndex = 0; colIndex < numColumns; colIndex++) {
-    let matchCount = 0;
-    let totalNonEmpty = 0;
+    const headerName = headers[colIndex]?.toString()?.trim() || '';
     
-    // Check all rows for this column (skip header)
-    for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
+    // Count non-empty cells in this column
+    let count = 0;
+    for (let rowIndex = 1; rowIndex < Math.min(data.length, 100); rowIndex++) {
       const cellValue = data[rowIndex][colIndex];
-      
       if (cellValue && typeof cellValue === 'string' && cellValue.trim()) {
-        totalNonEmpty++;
-        if (pattern.test(cellValue)) {
-          matchCount++;
-        }
+        count++;
       }
     }
     
-    // If >=50% of non-empty cells match the pattern, this is our column
-    if (totalNonEmpty > 0 && (matchCount / totalNonEmpty) >= 0.5) {
-      return colIndex;
+    if (count < 3) continue; // Skip columns with too few entries
+    
+    // Check for music column
+    if (!result.musicColumn) {
+      // Check header name
+      if (musicPatterns.some(p => p.test(headerName))) {
+        result.musicColumn = { index: colIndex, name: headerName, count };
+        continue;
+      }
+      
+      // Check cell pattern (like "nome da musica: Title")
+      let patternMatches = 0;
+      for (let rowIndex = 1; rowIndex < Math.min(data.length, 50); rowIndex++) {
+        const cellValue = data[rowIndex][colIndex];
+        if (cellValue && typeof cellValue === 'string' && /nome\s+da\s+musica:/i.test(cellValue)) {
+          patternMatches++;
+        }
+      }
+      
+      if (patternMatches >= count * 0.5) {
+        result.musicColumn = { index: colIndex, name: headerName || 'Música', count };
+        continue;
+      }
+    }
+    
+    // Check for artist column
+    if (!result.artistColumn && artistPatterns.some(p => p.test(headerName))) {
+      result.artistColumn = { index: colIndex, name: headerName, count };
+      continue;
+    }
+    
+    // Check for lyrics column
+    if (!result.lyricsColumn && lyricsPatterns.some(p => p.test(headerName))) {
+      result.lyricsColumn = { index: colIndex, name: headerName, count };
     }
   }
   
-  return -1;
+  return result;
 }
 
 function cleanTitle(raw: string): string {
