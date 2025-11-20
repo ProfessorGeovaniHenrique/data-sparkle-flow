@@ -155,15 +155,20 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 py-2">
-          <Checkbox 
-            id="header-check" 
-            checked={hasHeader} 
-            onCheckedChange={(c) => setHasHeader(!!c)} 
-          />
-          <Label htmlFor="header-check" className="cursor-pointer">
-            A primeira linha do arquivo contém cabeçalhos (ex: "Nome", "Artista")?
-          </Label>
+        <div className="space-y-3">
+          <div className="flex items-center space-x-2">
+            <Checkbox 
+              id="header-check" 
+              checked={hasHeader} 
+              onCheckedChange={(c) => setHasHeader(!!c)} 
+            />
+            <Label htmlFor="header-check" className="cursor-pointer">
+              A primeira linha do arquivo contém cabeçalhos (ex: "Nome", "Artista")?
+            </Label>
+          </div>
+          <p className="text-sm text-muted-foreground pl-6">
+            {rawRows.length - (hasHeader ? 1 : 0)} linhas serão processadas
+          </p>
         </div>
 
         {/* Preview da Tabela */}

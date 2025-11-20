@@ -157,6 +157,10 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           }
         }
 
+        // Log de debug: Dados extraídos
+        console.log('[Parser] Dados extraídos:', extractedData.length, 'músicas');
+        console.log('[Parser] Primeiras 3 músicas:', extractedData.slice(0, 3));
+
         // Calcula confiança da detecção
         const detectionConfidence: 'high' | 'low' = 
           (headerRowIndex > -1 && columnIndices.musica !== undefined) ? 'high' : 'low';
@@ -266,6 +270,10 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
             });
           }
         }
+
+        // Log de debug: Dados extraídos após mapeamento
+        console.log('[Parser] Dados extraídos após mapeamento:', extractedData.length, 'músicas');
+        console.log('[Parser] Primeiras 3 músicas:', extractedData.slice(0, 3));
 
         resolve({
           filename: file.name,
