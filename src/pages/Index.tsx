@@ -6,16 +6,19 @@ import { ActionButtons } from "@/components/ActionButtons";
 import { Database, FileText, CheckCircle, XCircle, Sparkles, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import { Button } from "@/components/ui/button";
 
 interface DataRow {
   id: string;
   [key: string]: any;
   status: "pending" | "enriched" | "validated" | "rejected";
+  source?: string;
 }
 
 const Index = () => {
   const [data, setData] = useState<DataRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 
   const stats = {
     total: data.length,
@@ -25,25 +28,48 @@ const Index = () => {
     rejected: data.filter(d => d.status === "rejected").length,
   };
 
-  const handleFileSelect = async (file: File) => {
+  const handleFilesSelect = (files: File[]) => {
+    setSelectedFiles(prev => [...prev, ...files]);
+    toast.success(`${files.length} arquivo(s) adicionado(s)`);
+  };
+
+  const handleRemoveFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    toast.info("Arquivo removido");
+  };
+
+  const handleProcessFiles = async () => {
+    if (selectedFiles.length === 0) {
+      toast.error("Nenhum arquivo selecionado");
+      return;
+    }
+
     setIsProcessing(true);
+    let totalProcessed = 0;
+
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: "array" });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      for (const file of selectedFiles) {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
-      const processedData: DataRow[] = jsonData.map((row: any, index: number) => ({
-        id: `row-${index}`,
-        ...row,
-        status: "pending" as const,
-      }));
+        const processedData: DataRow[] = jsonData.map((row: any, index: number) => ({
+          id: `${file.name}-row-${index}`,
+          ...row,
+          status: "pending" as const,
+          source: file.name,
+        }));
 
-      setData(processedData);
-      toast.success(`${processedData.length} registros carregados com sucesso!`);
+        setData(prev => [...prev, ...processedData]);
+        totalProcessed += processedData.length;
+      }
+
+      toast.success(`${totalProcessed} registros carregados de ${selectedFiles.length} arquivo(s)!`);
+      setSelectedFiles([]);
     } catch (error) {
-      toast.error("Erro ao processar arquivo");
+      toast.error("Erro ao processar arquivos");
       console.error(error);
     } finally {
       setIsProcessing(false);
@@ -127,9 +153,22 @@ const Index = () => {
 
         <div className="grid gap-6 lg:grid-cols-4">
           <div className="lg:col-span-3 space-y-6">
-            {data.length === 0 ? (
-              <FileUpload onFileSelect={handleFileSelect} isProcessing={isProcessing} />
-            ) : (
+            <FileUpload
+              onFilesSelect={handleFilesSelect}
+              isProcessing={isProcessing}
+              selectedFiles={selectedFiles}
+              onRemoveFile={handleRemoveFile}
+            />
+            
+            {selectedFiles.length > 0 && (
+              <div className="flex justify-end">
+                <Button onClick={handleProcessFiles} disabled={isProcessing} size="lg">
+                  {isProcessing ? "Processando..." : `Processar ${selectedFiles.length} Arquivo(s)`}
+                </Button>
+              </div>
+            )}
+
+            {data.length > 0 && (
               <DataTable
                 data={data}
                 onEnrich={handleEnrich}
