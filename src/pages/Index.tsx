@@ -1,39 +1,65 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { FileUpload } from "@/components/FileUpload";
 import { StatsCard } from "@/components/StatsCard";
 import { ProcessingPipeline } from "@/components/ProcessingPipeline";
 import { TitleExtractionResults } from "@/components/TitleExtractionResults";
 import { EnrichmentProgress } from "@/components/EnrichmentProgress";
+import { ProcessingControl } from "@/components/ProcessingControl";
+import { ErrorLog } from "@/components/ErrorLog";
 import { ValidationTable, EnrichedMusicItem } from "@/components/ValidationTable";
 import { ExportDialog, ExportOptions } from "@/components/ExportDialog";
+import { ProcessingProvider, useProcessing } from "@/contexts/ProcessingContext";
 import { Database, Sparkles, CheckCircle, FileText, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 
-const Index = () => {
+
+const IndexContent = () => {
+  const processing = useProcessing();
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [isEnriching, setIsEnriching] = useState(false);
   const [currentStep, setCurrentStep] = useState<'upload' | 'extract' | 'enrich' | 'validate' | 'export'>('upload');
   
   const [extractionResults, setExtractionResults] = useState<{
-    rawCount: number;
-    cleanCount: number;
-    titles: string[];
-    detectionResults: any[];
+    extractedTitles: any[];
+    stats: any;
+    files: any[];
   } | null>(null);
   
   const [enrichedData, setEnrichedData] = useState<EnrichedMusicItem[]>([]);
-  const [enrichmentProgress, setEnrichmentProgress] = useState({ total: 0, processed: 0, currentSong: '' });
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [startTime, setStartTime] = useState<number>(0);
 
   const stats = {
-    titlesFound: extractionResults?.rawCount || 0,
-    titlesClean: extractionResults?.cleanCount || 0,
+    titlesFound: extractionResults?.stats.totalTitles || 0,
+    titlesClean: extractionResults?.stats.uniqueTitles || 0,
     enriched: enrichedData.filter(d => d.status_pesquisa === 'Sucesso').length,
     failed: enrichedData.filter(d => d.status_pesquisa === 'Falha').length,
   };
+
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+
+  // Auto-save progress to localStorage
+  useEffect(() => {
+    if (processing.progress.current > 0) {
+      localStorage.setItem('musicEnrichment', JSON.stringify({
+        enrichedData,
+        progress: processing.progress.current
+      }));
+    }
+  }, [enrichedData, processing.progress.current]);
 
   const handleFilesSelect = (files: File[]) => {
     setSelectedFiles(prev => [...prev, ...files]);
@@ -53,6 +79,7 @@ const Index = () => {
 
     setIsExtracting(true);
     setCurrentStep('extract');
+    processing.setStatus('extracting');
     
     try {
       const formData = new FormData();
@@ -75,45 +102,60 @@ const Index = () => {
       }
 
       const result = await response.json();
-      if (!result) throw new Error('No result from extraction');
+      if (!result || !result.success) throw new Error('No result from extraction');
 
       setExtractionResults(result);
+      processing.setSelectedTitles(result.extractedTitles.map((t: any) => t.titulo));
       setSelectedFiles([]);
       
-      toast.success(`${result.cleanCount} títulos únicos extraídos!`);
+      toast.success(`${result.stats.uniqueTitles} títulos únicos extraídos!`);
       setCurrentStep('enrich');
+      processing.setStatus('idle');
     } catch (error: any) {
       toast.error("Erro ao extrair títulos: " + error.message);
       console.error(error);
       setCurrentStep('upload');
+      processing.setStatus('idle');
     } finally {
       setIsExtracting(false);
     }
   };
 
-  const handleEnrichData = async () => {
-    if (!extractionResults || extractionResults.titles.length === 0) {
-      toast.error("Nenhum título para enriquecer");
+  const handleEnrichData = async (titlesToEnrich?: string[]) => {
+    const titles = titlesToEnrich || processing.selectedTitles;
+    
+    if (titles.length === 0) {
+      toast.error("Nenhum título selecionado para enriquecer");
       return;
     }
 
-    setIsEnriching(true);
+    processing.setStatus('enriching');
     setCurrentStep('enrich');
-    setEnrichmentProgress({ total: extractionResults.titles.length, processed: 0, currentSong: '' });
+    processing.setProgress({ total: titles.length, current: 0, speed: 0, eta: 0 });
+    setStartTime(Date.now());
 
     try {
-      const batchSize = 20;
-      let allEnriched: EnrichedMusicItem[] = [];
+      const batchSize = 5; // Reduced for better control
+      let allEnriched: EnrichedMusicItem[] = [...enrichedData];
+      let successCount = 0;
+      let failureCount = 0;
 
-      for (let i = 0; i < extractionResults.titles.length; i += batchSize) {
-        const batch = extractionResults.titles.slice(i, i + batchSize);
+      for (let i = 0; i < titles.length; i += batchSize) {
+        // Check if paused or cancelled
+        if (processing.status === 'paused') {
+          while (processing.status === 'paused') {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
         
-        setEnrichmentProgress({
-          total: extractionResults.titles.length,
-          processed: i,
-          currentSong: batch[0] || ''
-        });
+        if (processing.status === 'cancelled') {
+          toast.info("Processamento cancelado");
+          break;
+        }
 
+        const batch = titles.slice(i, i + batchSize);
+        const batchStart = Date.now();
+        
         const { data: result, error } = await supabase.functions.invoke('enrich-music-data', {
           body: { titles: batch }
         });
@@ -129,26 +171,55 @@ const Index = () => {
             toast.error("Créditos insuficientes no Lovable AI.");
             break;
           }
-          throw error;
+          
+          // Log errors
+          batch.forEach(title => {
+            processing.addError({
+              item: title,
+              error: error.message,
+              timestamp: new Date()
+            });
+          });
+          failureCount += batch.length;
+          continue;
         }
 
-        allEnriched = [...allEnriched, ...result.enrichedData];
+        if (result?.enrichedData) {
+          allEnriched = [...allEnriched, ...result.enrichedData];
+          successCount += result.enrichedData.filter((d: any) => d.status_pesquisa === 'Sucesso').length;
+          failureCount += result.enrichedData.filter((d: any) => d.status_pesquisa === 'Falha').length;
+        }
+
+        // Update progress
+        const elapsed = (Date.now() - startTime) / 1000;
+        const processed = Math.min(i + batchSize, titles.length);
+        const speed = processed / elapsed;
+        const eta = (titles.length - processed) / speed;
+
+        processing.setProgress({
+          current: processed,
+          total: titles.length,
+          speed,
+          eta
+        });
+
+        // Auto-save every 10 songs
+        if (processed % 10 === 0) {
+          setEnrichedData(allEnriched);
+        }
       }
 
       setEnrichedData(allEnriched);
-      setEnrichmentProgress({ 
-        total: extractionResults.titles.length, 
-        processed: allEnriched.length, 
-        currentSong: '' 
-      });
       
-      toast.success(`${allEnriched.length} músicas enriquecidas!`);
-      setCurrentStep('validate');
+      if (processing.status !== 'cancelled') {
+        processing.setStatus('completed');
+        toast.success(`${allEnriched.length} músicas processadas!`);
+        setCurrentStep('validate');
+      }
     } catch (error: any) {
       toast.error("Erro ao enriquecer dados: " + error.message);
       console.error(error);
-    } finally {
-      setIsEnriching(false);
+      processing.setStatus('idle');
     }
   };
 
@@ -184,11 +255,29 @@ const Index = () => {
   };
 
   const handleReset = () => {
+    setShowResetDialog(true);
+  };
+
+  const confirmReset = () => {
     setExtractionResults(null);
     setEnrichedData([]);
     setCurrentStep('upload');
     setSelectedFiles([]);
+    processing.reset();
+    localStorage.removeItem('musicEnrichment');
     toast.success("Dados resetados!");
+    setShowResetDialog(false);
+  };
+
+  const handleCancelProcess = () => {
+    if (processing.status === 'enriching') {
+      setShowCancelDialog(true);
+    }
+  };
+
+  const confirmCancel = () => {
+    processing.cancel();
+    setShowCancelDialog(false);
   };
 
   return (
@@ -216,6 +305,11 @@ const Index = () => {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
+          <div className="space-y-6">
+            <ProcessingControl />
+            <ErrorLog onRetry={handleEnrichData} />
+          </div>
+          
           <div className="lg:col-span-2 space-y-6">
             {currentStep === 'upload' && (
               <>
@@ -243,27 +337,27 @@ const Index = () => {
               </div>
             )}
 
-            {currentStep === 'enrich' && !isEnriching && extractionResults && (
+            {currentStep === 'enrich' && !processing.status.includes('enriching') && extractionResults && (
               <>
                 <TitleExtractionResults
-                  rawCount={extractionResults.rawCount}
-                  cleanCount={extractionResults.cleanCount}
-                  detectionResults={extractionResults.detectionResults}
+                  extractedTitles={extractionResults.extractedTitles}
+                  stats={extractionResults.stats}
+                  files={extractionResults.files}
+                  onSelectionChange={processing.setSelectedTitles}
                 />
                 <div className="flex justify-end">
-                  <Button onClick={handleEnrichData} size="lg">
+                  <Button onClick={() => handleEnrichData()} size="lg" disabled={processing.selectedTitles.length === 0}>
                     <Sparkles className="w-4 h-4 mr-2" />
-                    Buscar Metadados com IA ({extractionResults.cleanCount} músicas)
+                    Buscar Metadados com IA ({processing.selectedTitles.length} músicas)
                   </Button>
                 </div>
               </>
             )}
 
-            {currentStep === 'enrich' && isEnriching && (
+            {processing.status === 'enriching' && (
               <EnrichmentProgress
-                total={enrichmentProgress.total}
-                processed={enrichmentProgress.processed}
-                currentSong={enrichmentProgress.currentSong}
+                successCount={stats.enriched}
+                failureCount={stats.failed}
               />
             )}
 
@@ -274,31 +368,30 @@ const Index = () => {
               />
             )}
           </div>
+        </div>
 
-          <div className="space-y-4">
-            {enrichedData.length > 0 && (
-              <>
-                <Button
-                  className="w-full"
-                  size="lg"
-                  onClick={() => {
-                    setCurrentStep('export');
-                    setExportDialogOpen(true);
-                  }}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Exportar CSV
-                </Button>
-                <Button
-                  className="w-full"
-                  variant="outline"
-                  onClick={handleReset}
-                >
-                  Recomeçar
-                </Button>
-              </>
-            )}
-          </div>
+        <div className="flex justify-end mt-6 gap-4">
+          {enrichedData.length > 0 && (
+            <>
+              <Button
+                size="lg"
+                onClick={() => {
+                  setCurrentStep('export');
+                  setExportDialogOpen(true);
+                }}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Exportar CSV
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleReset}
+              >
+                Recomeçar
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -307,8 +400,44 @@ const Index = () => {
         onOpenChange={setExportDialogOpen}
         onExport={handleExportCSV}
       />
+
+      <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Resetar todos os dados?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação irá apagar todos os dados extraídos e enriquecidos. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmReset}>Resetar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar processamento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O processamento em andamento será interrompido. Os dados já processados serão mantidos.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar Processando</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmCancel}>Cancelar Processo</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
+
+const Index = () => (
+  <ProcessingProvider>
+    <IndexContent />
+  </ProcessingProvider>
+);
 
 export default Index;
