@@ -3,6 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
 import { parseExcelFile, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult } from '@/lib/excelParser';
+import { deduplicateMusicData } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import ColumnMapper, { ColumnMap } from '@/components/ColumnMapper';
@@ -18,6 +19,15 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
   const [rawFiles, setRawFiles] = useState<File[]>([]);
   const [needsMapping, setNeedsMapping] = useState(false);
   const [rawParseData, setRawParseData] = useState<RawParseResult | null>(null);
+  
+  // Novos estados para deduplicação
+  const [showDeduplicationPreview, setShowDeduplicationPreview] = useState(false);
+  const [preDedupeData, setPreDedupeData] = useState<ParseResult[] | null>(null);
+  const [deduplicationStats, setDeduplicationStats] = useState<{
+    totalOriginal: number;
+    duplicatesRemoved: number;
+    uniqueCount: number;
+  } | null>(null);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
@@ -63,7 +73,8 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     } finally {
       setIsParsing(false);
       if (!hasError && results.length > 0) {
-        setParseResults(results);
+        // Em vez de setar parseResults diretamente, faz deduplicação primeiro
+        checkForDuplicates(results);
       } else if (!needsMapping) {
         setRawFiles([]);
       }
@@ -110,7 +121,8 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
         return;
       }
       
-      setParseResults([result]);
+      // Em vez de setar parseResults diretamente, verifica duplicatas
+      checkForDuplicates([result]);
       setNeedsMapping(false);
       setRawParseData(null);
       toast.success(`${result.totalRows} músicas extraídas com sucesso!`);
@@ -126,6 +138,66 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     toast.info("Mapeamento cancelado.");
   };
 
+  const checkForDuplicates = (results: ParseResult[]) => {
+    // Concatena todos os dados extraídos de todos os arquivos
+    const allMusic = results.flatMap(r => r.extractedData);
+    
+    // Roda deduplicação
+    const dedupeResult = deduplicateMusicData(allMusic);
+    
+    if (dedupeResult.duplicatesRemoved > 0) {
+      // Duplicatas encontradas: mostra preview de limpeza
+      console.log('[FileUpload] Duplicatas detectadas:', dedupeResult.duplicatesRemoved);
+      setPreDedupeData(results);
+      setDeduplicationStats({
+        totalOriginal: dedupeResult.totalOriginal,
+        duplicatesRemoved: dedupeResult.duplicatesRemoved,
+        uniqueCount: dedupeResult.unique.length
+      });
+      setShowDeduplicationPreview(true);
+      toast.info(`${dedupeResult.duplicatesRemoved} duplicatas encontradas. Revise antes de prosseguir.`);
+    } else {
+      // Sem duplicatas: segue fluxo normal
+      console.log('[FileUpload] Nenhuma duplicata encontrada');
+      setParseResults(results);
+      toast.success("Nenhuma duplicata encontrada. Pronto para processar!");
+    }
+  };
+
+  const handleApplyDeduplication = () => {
+    if (!preDedupeData) return;
+    
+    // Aplica deduplicação
+    const allMusic = preDedupeData.flatMap(r => r.extractedData);
+    const dedupeResult = deduplicateMusicData(allMusic);
+    
+    // Cria novo ParseResult com dados limpos
+    const cleanedResult: ParseResult = {
+      filename: preDedupeData[0].filename,
+      totalRows: dedupeResult.unique.length,
+      extractedData: dedupeResult.unique,
+      columnsDetected: preDedupeData[0].columnsDetected,
+      detectionConfidence: preDedupeData[0].detectionConfidence
+    };
+    
+    setParseResults([cleanedResult]);
+    setShowDeduplicationPreview(false);
+    setPreDedupeData(null);
+    setDeduplicationStats(null);
+    toast.success(`Limpeza aplicada! ${dedupeResult.duplicatesRemoved} duplicatas removidas.`);
+  };
+
+  const handleKeepDuplicates = () => {
+    if (!preDedupeData) return;
+    
+    // Usa dados originais sem deduplicação
+    setParseResults(preDedupeData);
+    setShowDeduplicationPreview(false);
+    setPreDedupeData(null);
+    setDeduplicationStats(null);
+    toast.info("Duplicatas mantidas. Todos os dados serão processados.");
+  };
+
   // Se precisa de mapeamento, mostra o ColumnMapper
   if (needsMapping && rawParseData) {
     return (
@@ -135,6 +207,85 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
         onConfirm={handleMappingConfirm}
         onCancel={handleMappingCancel}
       />
+    );
+  }
+
+  // Preview de deduplicação (nova etapa intermediária)
+  if (showDeduplicationPreview && deduplicationStats && preDedupeData) {
+    return (
+      <div className="w-full p-6 border-2 border-yellow-500/30 rounded-xl bg-background/50 backdrop-blur-sm animate-fade-in">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-8 h-8 text-yellow-500" />
+            <div>
+              <h3 className="text-lg font-semibold">Duplicatas Detectadas</h3>
+              <p className="text-sm text-muted-foreground">
+                Encontramos linhas redundantes que precisam de revisão
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Estatísticas de Limpeza */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
+            <div className="text-2xl font-bold text-blue-500">
+              {deduplicationStats.totalOriginal.toLocaleString()}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Total de linhas lidas
+            </div>
+          </div>
+          
+          <div className="p-4 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+            <div className="text-2xl font-bold text-yellow-500">
+              {deduplicationStats.duplicatesRemoved.toLocaleString()}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Duplicatas encontradas
+            </div>
+          </div>
+          
+          <div className="p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+            <div className="text-2xl font-bold text-green-500">
+              {deduplicationStats.uniqueCount.toLocaleString()}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Músicas únicas após limpeza
+            </div>
+          </div>
+        </div>
+
+        {/* Explicação */}
+        <div className="mb-6 p-4 bg-muted/30 rounded-lg">
+          <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-yellow-500" /> O que são duplicatas?
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            Detectamos linhas redundantes para a mesma música (mesmo título + artista). 
+            Isso é comum em dados de scraping. A limpeza automática mantém a versão 
+            mais completa de cada música (com mais campos preenchidos).
+          </p>
+        </div>
+
+        {/* Botões de Ação */}
+        <div className="flex gap-3 justify-end">
+          <Button 
+            variant="outline" 
+            onClick={handleKeepDuplicates}
+            disabled={isProcessing}
+          >
+            Manter Duplicatas
+          </Button>
+          <Button 
+            onClick={handleApplyDeduplication}
+            disabled={isProcessing}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            Aplicar Limpeza ({deduplicationStats.uniqueCount.toLocaleString()} músicas)
+          </Button>
+        </div>
+      </div>
     );
   }
 
