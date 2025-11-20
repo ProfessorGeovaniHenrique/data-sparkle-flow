@@ -46,6 +46,11 @@ export interface ProcessingContextType extends ProcessingState {
   cancel: () => void;
   reset: () => void;
   clearSavedState: () => void;
+  approveItem: (id: string) => void;
+  approveMultiple: (ids: string[]) => void;
+  getPendingItems: () => EnrichedMusicData[];
+  getApprovedItems: () => EnrichedMusicData[];
+  getQueuedItems: () => { id: string; titulo: string; artista: string; fonte: string }[];
 }
 
 const ProcessingContext = createContext<ProcessingContextType | undefined>(undefined);
@@ -178,6 +183,42 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [reset]);
 
+  const approveItem = useCallback((id: string) => {
+    setResults(prev => prev.map(item => 
+      item.id === id 
+        ? { ...item, approval_status: 'approved' as const } 
+        : item
+    ));
+    toast.success('Música aprovada!');
+  }, []);
+
+  const approveMultiple = useCallback((ids: string[]) => {
+    setResults(prev => prev.map(item => 
+      ids.includes(item.id || '') 
+        ? { ...item, approval_status: 'approved' as const } 
+        : item
+    ));
+    toast.success(`${ids.length} músicas aprovadas!`);
+  }, []);
+
+  const getPendingItems = useCallback(() => {
+    return results.filter(r => r.approval_status !== 'approved');
+  }, [results]);
+
+  const getApprovedItems = useCallback(() => {
+    return results.filter(r => r.approval_status === 'approved');
+  }, [results]);
+
+  const getQueuedItems = useCallback(() => {
+    const processedCount = results.length;
+    return selectedTitles.slice(processedCount).map((titulo, idx) => ({
+      id: `queued-${idx}`,
+      titulo,
+      artista: '',
+      fonte: 'upload'
+    }));
+  }, [results, selectedTitles]);
+
   return (
     <ProcessingContext.Provider
       value={{
@@ -200,6 +241,11 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
         cancel,
         reset,
         clearSavedState,
+        approveItem,
+        approveMultiple,
+        getPendingItems,
+        getApprovedItems,
+        getQueuedItems,
       }}
     >
       {children}

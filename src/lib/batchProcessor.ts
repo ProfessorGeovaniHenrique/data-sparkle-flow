@@ -9,6 +9,7 @@ export interface EnrichedMusicData {
   ano_lancamento: string;
   status_pesquisa: string;
   observacoes?: string;
+  approval_status?: 'pending' | 'approved';
 }
 
 type ProcessBatchFn = (batch: ParsedMusic[]) => Promise<EnrichedMusicData[]>;
@@ -23,6 +24,7 @@ export class BatchProcessor {
   private isRunning: boolean = false;
   private readonly MAX_RETRIES = 3;
   private readonly INITIAL_RETRY_DELAY_MS = 2000;
+  private readonly CONCURRENCY = 3;
 
   constructor(
     items: ParsedMusic[],
@@ -95,37 +97,56 @@ export class BatchProcessor {
         // Para se cancelado (status volta para idle)
         if (this.context.status === 'idle') break;
 
-        const currentBatch = Math.floor(this.currentIndex / this.batchSize);
-        const batch = this.items.slice(this.currentIndex, this.currentIndex + this.batchSize);
-
-        try {
-          const batchResults = await this.processWithRetry(batch, currentBatch + 1);
-          this.results.push(...batchResults);
+        // Process up to CONCURRENCY batches in parallel
+        const batchPromises: Promise<void>[] = [];
+        
+        for (let i = 0; i < this.CONCURRENCY && this.currentIndex < this.items.length; i++) {
+          const batchStart = this.currentIndex;
+          const batch = this.items.slice(batchStart, batchStart + this.batchSize);
+          const batchNumber = Math.floor(batchStart / this.batchSize) + 1;
           
-          this.context.setResults([...this.results]);
+          this.currentIndex += batch.length;
+          
+          const batchPromise = this.processWithRetry(batch, batchNumber)
+            .then(batchResults => {
+              // Mark as pending by default (inbox)
+              const enrichedResults = batchResults.map(r => ({
+                ...r,
+                approval_status: 'pending' as const
+              }));
+              
+              this.results.push(...enrichedResults);
+              this.context.setResults([...this.results]);
+            })
+            .catch(batchError => {
+              this.context.addError({
+                timestamp: new Date().toISOString(),
+                message: `Falha no lote ${batchNumber}/${totalBatches}`,
+                details: batchError instanceof Error ? batchError.message : 'Erro desconhecido',
+                failedItems: batch.map(m => m.titulo)
+              });
 
-        } catch (error) {
-          this.context.addError({
-            timestamp: new Date().toISOString(),
-            message: `Falha no lote ${currentBatch + 1}/${totalBatches}`,
-            details: error instanceof Error ? error.message : 'Erro desconhecido',
-            failedItems: batch.map(m => m.titulo)
-          });
-
-          batch.forEach(music => {
-            this.results.push({
-              id: music.id,
-              titulo_original: music.titulo,
-              artista_encontrado: 'Não Identificado',
-              compositor_encontrado: 'Não Identificado',
-              ano_lancamento: '0000',
-              observacoes: 'Erro no processamento do lote',
-              status_pesquisa: 'Falha'
+              batch.forEach(music => {
+                this.results.push({
+                  id: music.id,
+                  titulo_original: music.titulo,
+                  artista_encontrado: 'Não Identificado',
+                  compositor_encontrado: 'Não Identificado',
+                  ano_lancamento: '0000',
+                  observacoes: 'Erro no processamento do lote',
+                  status_pesquisa: 'Falha',
+                  approval_status: 'pending' as const
+                });
+              });
+              
+              this.context.setResults([...this.results]);
             });
-          });
+          
+          batchPromises.push(batchPromise);
         }
-
-        this.currentIndex += batch.length;
+        
+        // Wait for all parallel batches to complete
+        await Promise.all(batchPromises);
         
         const now = Date.now();
         const elapsedSinceLastUpdate = (now - lastUpdateTime) / 1000;
