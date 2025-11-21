@@ -14,13 +14,133 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      artists: {
+        Row: {
+          created_at: string | null
+          genre: string | null
+          id: string
+          name: string
+          normalized_name: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          genre?: string | null
+          id?: string
+          name: string
+          normalized_name?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          genre?: string | null
+          id?: string
+          name?: string
+          normalized_name?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      songs: {
+        Row: {
+          artist_id: string
+          composer: string | null
+          confidence_score: number | null
+          created_at: string | null
+          enrichment_source: string | null
+          id: string
+          lyrics: string | null
+          normalized_title: string | null
+          raw_data: Json | null
+          release_year: string | null
+          status: string | null
+          title: string
+          updated_at: string | null
+          upload_id: string | null
+        }
+        Insert: {
+          artist_id: string
+          composer?: string | null
+          confidence_score?: number | null
+          created_at?: string | null
+          enrichment_source?: string | null
+          id?: string
+          lyrics?: string | null
+          normalized_title?: string | null
+          raw_data?: Json | null
+          release_year?: string | null
+          status?: string | null
+          title: string
+          updated_at?: string | null
+          upload_id?: string | null
+        }
+        Update: {
+          artist_id?: string
+          composer?: string | null
+          confidence_score?: number | null
+          created_at?: string | null
+          enrichment_source?: string | null
+          id?: string
+          lyrics?: string | null
+          normalized_title?: string | null
+          raw_data?: Json | null
+          release_year?: string | null
+          status?: string | null
+          title?: string
+          updated_at?: string | null
+          upload_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "songs_artist_id_fkey"
+            columns: ["artist_id"]
+            isOneToOne: false
+            referencedRelation: "artists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "songs_upload_id_fkey"
+            columns: ["upload_id"]
+            isOneToOne: false
+            referencedRelation: "uploads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      uploads: {
+        Row: {
+          created_at: string | null
+          filename: string
+          id: string
+          processed_rows: number | null
+          status: string | null
+          total_rows: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          filename: string
+          id?: string
+          processed_rows?: number | null
+          status?: string | null
+          total_rows?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          filename?: string
+          id?: string
+          processed_rows?: number | null
+          status?: string | null
+          total_rows?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      normalize_text: { Args: { "": string }; Returns: string }
+      unaccent: { Args: { "": string }; Returns: string }
     }
     Enums: {
       [_ in never]: never
