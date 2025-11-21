@@ -12,6 +12,9 @@ export interface EnrichedMusicData {
   observacoes?: string;
   approval_status?: 'pending' | 'approved';
   enriched_by_web?: boolean; // Indica se foi usado fallback de pesquisa web
+  processing_start_time?: string; // ISO timestamp
+  processing_end_time?: string;   // ISO timestamp
+  processing_duration_ms?: number; // Duração em milissegundos
 }
 
 type ProcessBatchFn = (batch: ParsedMusic[]) => Promise<EnrichedMusicData[]>;
@@ -50,6 +53,8 @@ export class BatchProcessor {
     console.log('[BatchProcessor] processWithRetry - Batch', batchNumber, 'com', batch.length, 'items');
     let lastError: Error | null = null;
     
+    const batchStartTime = new Date().toISOString();
+    
     for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
       try {
         console.log('[BatchProcessor] Tentativa', attempt, '/', this.MAX_RETRIES, 'para batch', batchNumber);
@@ -63,10 +68,25 @@ export class BatchProcessor {
           });
         }
         
+        const attemptStartTime = Date.now();
+        
         console.log('[BatchProcessor] Chamando processBatch para batch', batchNumber);
         const results = await this.processBatch(batch);
         console.log('[BatchProcessor] processBatch retornou', results.length, 'resultados para batch', batchNumber);
-        return results;
+        
+        const batchEndTime = new Date().toISOString();
+        const attemptDuration = Date.now() - attemptStartTime;
+        
+        const enrichedResults = results.map(result => ({
+          ...result,
+          processing_start_time: batchStartTime,
+          processing_end_time: batchEndTime,
+          processing_duration_ms: Math.round(attemptDuration / results.length),
+        }));
+        
+        console.log(`[BatchProcessor] Batch ${batchNumber} processado em ${attemptDuration}ms (${Math.round(attemptDuration / results.length)}ms/música)`);
+        
+        return enrichedResults;
         
       } catch (error) {
         console.error('[BatchProcessor] ERRO na tentativa', attempt, 'do batch', batchNumber, ':', error);
