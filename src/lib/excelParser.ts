@@ -5,6 +5,7 @@ export interface ParsedMusic {
   artista?: string;
   compositor?: string;
   ano?: string;
+  letra?: string;
   fonte: string;
   id: string;
 }
@@ -34,6 +35,7 @@ export interface ColumnMap {
   artistaIndex: number;
   compositorIndex: number;
   anoIndex: number;
+  letraIndex: number;
   hasHeader: boolean;
 }
 
@@ -182,6 +184,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             else if (lowerCell.includes('artista') || lowerCell.includes('intérprete')) columnIndices.artista = index;
             else if (lowerCell.includes('compositor') || lowerCell.includes('autor')) columnIndices.compositor = index;
             else if (lowerCell.includes('ano') || lowerCell.includes('lançamento')) columnIndices.ano = index;
+            else if (lowerCell.includes('letra') || lowerCell.includes('lyric')) columnIndices.letra = index;
           });
 
           if (columnIndices.musica !== undefined) {
@@ -280,12 +283,16 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
                 lastSeenCompositor = String(rawCompositor).trim();
               }
 
+              const rawLetra = columnIndices.letra !== undefined ? row[columnIndices.letra] : undefined;
+              const letra = rawLetra && String(rawLetra).trim().length > 0 ? String(rawLetra).trim() : undefined;
+
               extractedData.push({
                 id: `${file.name}-${i}`,
                 titulo: cleanTitle(rawTitle),
                 artista: lastSeenArtista, // Usa o último artista visto
                 compositor: lastSeenCompositor, // Usa o último compositor visto
                 ano: columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined,
+                letra: letra,
                 fonte: file.name
               });
             }
@@ -412,6 +419,9 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
               lastSeenCompositor = String(rawCompositor).trim();
             }
 
+            const rawLetra = map.letraIndex >= 0 ? row[map.letraIndex] : undefined;
+            const letra = rawLetra && String(rawLetra).trim().length > 0 ? String(rawLetra).trim() : undefined;
+
             extractedData.push({
               id: `${file.name}-${i}`,
               titulo: cleanTitle(String(tituloRaw)),
@@ -420,6 +430,7 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
               ano: map.anoIndex >= 0 && row[map.anoIndex]
                 ? String(row[map.anoIndex])
                 : undefined,
+              letra: letra,
               fonte: file.name
             });
           }
