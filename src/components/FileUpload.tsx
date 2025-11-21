@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
-import { parseExcelWithWorker, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult, cleanScraperData } from '@/lib/excelParser';
+import { parseExcelWithWorker, ParseResult, parseExcelRaw, extractDataFromMap, parseExcelFile, RawParseResult, cleanScraperData } from '@/lib/excelParser';
 import { deduplicateMusicData } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -71,16 +71,9 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
             setParsingProgress(0);
             return; // Para aqui e mostra o mapper
           } else {
-            // Alta confiança: extrai dados automaticamente
+            // Alta confiança: usa parseExcelFile que já tem detecção automática completa
             addLog('✓ Colunas detectadas automaticamente com alta confiança');
-            const result = await extractDataFromMap(file, {
-              tituloIndex: 0, // Será ajustado pela extração automática
-              artistaIndex: -1,
-              compositorIndex: -1,
-              anoIndex: -1,
-              letraIndex: -1,
-              hasHeader: true
-            });
+            const result = await parseExcelFile(file);
             
             // Validação: se nenhum dado foi extraído
             if (result.extractedData.length === 0) {
@@ -358,7 +351,13 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
 
   if (parseResults.length > 0) {
     const totalMusicas = parseResults.reduce((acc, curr) => acc + curr.totalRows, 0);
-    const previewData = parseResults[0].extractedData.slice(0, 5);
+    const previewData = parseResults[0].extractedData.slice(0, 10);
+    
+    // Calcular estatísticas de diversidade
+    const uniqueTitles = new Set(
+      parseResults.flatMap(r => r.extractedData.map(m => m.titulo.toLowerCase()))
+    );
+    const diversityRatio = uniqueTitles.size / totalMusicas;
 
     return (
       <div className="w-full p-6 border-2 border-primary/20 rounded-xl bg-background/50 backdrop-blur-sm animate-fade-in">
@@ -379,22 +378,39 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
           )}
         </div>
 
+        {/* Estatísticas de Parsing */}
+        <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+          <div className="text-sm text-blue-900 dark:text-blue-100 font-medium mb-2">
+            📊 Estatísticas de Parsing
+          </div>
+          <div className="text-xs text-blue-700 dark:text-blue-300 space-y-1">
+            <div>• Linhas processadas: {totalMusicas}</div>
+            <div>• Títulos únicos: {uniqueTitles.size} {diversityRatio > 0.9 ? '✓' : diversityRatio > 0.5 ? '⚠️' : '❌'}</div>
+            <div>• Diversidade: {(diversityRatio * 100).toFixed(0)}% {diversityRatio > 0.9 ? '(Excelente)' : diversityRatio > 0.5 ? '(Moderada)' : '(Baixa - verificar mapeamento)'}</div>
+            <div>• Colunas detectadas: {Object.entries(parseResults[0].columnsDetected).filter(([_, v]) => v).map(([k]) => k).join(', ')}</div>
+          </div>
+        </div>
+
         <div className="mb-4 p-4 bg-muted/30 rounded-lg">
           <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
             <FileSpreadsheet className="w-4 h-4" /> Preview do arquivo: {parseResults[0].filename}
           </h4>
-          <ScrollArea className="h-[150px] w-full rounded-md border p-2">
+          <ScrollArea className="h-[200px] w-full rounded-md border p-2">
             <ul className="space-y-1 text-sm">
               {previewData.map((item, idx) => (
                 <li key={item.id} className="flex items-center gap-2 py-1 border-b last:border-0 border-border/50">
-                  <span className="text-muted-foreground w-6">{idx + 1}.</span>
-                  <span className="font-medium truncate">{item.titulo}</span>
-                  {item.artista && <span className="text-xs text-muted-foreground">- {item.artista}</span>}
+                  <span className="text-muted-foreground w-8 text-xs">#{idx + 1}</span>
+                  <span className="font-medium truncate flex-1">{item.titulo}</span>
+                  {item.artista && item.artista !== 'Desconhecido' && (
+                    <span className="text-xs text-muted-foreground truncate max-w-[150px]">
+                      {item.artista}
+                    </span>
+                  )}
                 </li>
               ))}
-              {parseResults[0].totalRows > 5 && (
-                <li className="text-xs text-muted-foreground pt-2">
-                  ...e mais {parseResults[0].totalRows - 5} músicas neste arquivo.
+              {parseResults[0].totalRows > 10 && (
+                <li className="text-xs text-muted-foreground pt-2 italic">
+                  ...e mais {parseResults[0].totalRows - 10} músicas neste arquivo.
                 </li>
               )}
             </ul>

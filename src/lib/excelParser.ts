@@ -423,6 +423,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           // Estado persistente do último artista/compositor visto
           let lastValidArtist: string = 'Desconhecido';
           let lastValidComposer: string = '';
+          let fillDownCount = 0; // Contador de Fill Down
 
           // Iterar linha a linha, sem filtros prévios
           for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
@@ -457,7 +458,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             } else {
               // Célula vazia -> Herda o anterior
               effectiveArtist = lastValidArtist;
-              console.log(`[Parser] Linha ${i}: Herdando artista '${effectiveArtist}'`);
+              fillDownCount++; // Incrementa contador
             }
 
             // 4. Lógica de Compositor (Fill Down)
@@ -483,16 +484,32 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             });
           }
 
-          console.log('[Parser] Fill Down aplicado. Último artista:', lastValidArtist);
+          // Log de Fill Down
+          if (fillDownCount > 0) {
+            console.log(`[Parser] Fill Down aplicado ${fillDownCount} vezes. Último artista: '${lastValidArtist}'`);
+          } else {
+            console.log('[Parser] Fill Down não foi necessário (artista presente em todas as linhas)');
+          }
         }
 
-        // Log de debug: Dados extraídos (ANTES da consolidação)
+        // Log de debug: Dados extraídos
         console.log('[Parser] Dados extraídos:', extractedData.length, 'músicas');
         console.log('[Parser] Primeiras 3 músicas:', extractedData.slice(0, 3));
 
-        // Consolidar duplicatas
-        const consolidatedData = consolidateDuplicates(extractedData);
-        console.log('[Parser] Após consolidação:', consolidatedData.length, 'músicas únicas');
+        // Validar diversidade de títulos (detecta parsing incorreto)
+        const uniqueTitles = new Set(extractedData.map(m => m.titulo.toLowerCase()));
+        const diversityRatio = uniqueTitles.size / extractedData.length;
+
+        if (diversityRatio < 0.5) {
+          console.warn(`[Parser] ⚠️ ALERTA: Apenas ${uniqueTitles.size} títulos únicos de ${extractedData.length} linhas (${(diversityRatio * 100).toFixed(0)}%)`);
+          console.warn('[Parser] Títulos detectados:', Array.from(uniqueTitles).slice(0, 5));
+          console.warn('[Parser] Possível erro de mapeamento de colunas! Verifique se as colunas foram detectadas corretamente.');
+        } else {
+          console.log(`[Parser] ✓ Diversidade de títulos: ${(diversityRatio * 100).toFixed(0)}% (${uniqueTitles.size}/${extractedData.length})`);
+        }
+
+        // Retornar dados SEM consolidação (será feito no FileUpload se necessário)
+        console.log('[Parser] Retornando dados extraídos sem consolidação (deduplicação será feita no FileUpload)');
 
         // Calcula confiança da detecção
         const detectionConfidence: 'high' | 'low' = 
@@ -500,8 +517,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
 
         resolve({
           filename: file.name,
-          totalRows: consolidatedData.length,
-          extractedData: consolidatedData,
+          totalRows: extractedData.length,
+          extractedData: extractedData,
           columnsDetected: {
             musica: true,
             artista: isAlternatingFormat ? true : (columnIndices.artista !== undefined),
