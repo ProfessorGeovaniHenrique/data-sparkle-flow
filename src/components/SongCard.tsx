@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles, Youtube } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -14,6 +14,7 @@ interface SongCardProps {
   status: string;
   enrichmentSource: string | null;
   confidenceScore: number;
+  youtubeUrl?: string | null;
   isRecentlyEnriched?: boolean;
 }
 
@@ -33,6 +34,7 @@ export function SongCard({
   status,
   enrichmentSource,
   confidenceScore,
+  youtubeUrl,
   isRecentlyEnriched = false
 }: SongCardProps) {
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
@@ -50,9 +52,22 @@ export function SongCard({
         {/* Header: Título e Badges */}
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-3">
-            <h3 className="text-2xl font-bold flex-1 leading-tight text-foreground">
-              {title || 'Título não identificado'}
-            </h3>
+            <div className="flex items-start gap-2 flex-1">
+              <h3 className="text-2xl font-bold leading-tight text-foreground">
+                {title || 'Título não identificado'}
+              </h3>
+              {youtubeUrl && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                  onClick={() => window.open(youtubeUrl, '_blank')}
+                  title="Ouvir no YouTube"
+                >
+                  <Youtube className="w-5 h-5" />
+                </Button>
+              )}
+            </div>
             <div className="flex gap-2 shrink-0">
               <Badge className={statusInfo.color}>
                 {statusInfo.label}

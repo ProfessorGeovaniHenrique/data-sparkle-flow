@@ -29,6 +29,7 @@ interface Song {
   status: string;
   enrichment_source: string | null;
   confidence_score: number;
+  youtube_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -538,6 +539,7 @@ export default function Catalog() {
                     status={song.status}
                     enrichmentSource={song.enrichment_source}
                     confidenceScore={song.confidence_score}
+                    youtubeUrl={song.youtube_url}
                     isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
                   />
                 ))}
