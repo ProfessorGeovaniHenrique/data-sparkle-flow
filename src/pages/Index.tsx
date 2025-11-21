@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { supabase } from '@/integrations/supabase/client';
 import { FileUpload } from '@/components/FileUpload';
 import { ProcessingControl } from '@/components/ProcessingControl';
+import { ProcessingDashboard } from '@/components/ProcessingDashboard';
 import { WorkflowTabs } from '@/components/WorkflowTabs';
 import { ErrorLog } from '@/components/ErrorLog';
 import { Download, Music, RotateCcw } from 'lucide-react';
@@ -212,6 +213,8 @@ const IndexContent = () => {
         {processingContext.errors.length > 0 && (
           <ErrorLog onRetry={handleRetryFailed} />
         )}
+
+        {enrichedData.length > 0 && <ProcessingDashboard />}
 
         {enrichedData.length > 0 && (
           <WorkflowTabs 
