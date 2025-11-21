@@ -94,6 +94,10 @@ export const ResultsProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const approveItem = useCallback((id: string) => {
+    if (!id) {
+      console.error('[Results] Tentativa de aprovar item sem ID');
+      return;
+    }
     setResults(prev => prev.map(item => 
       item.id === id 
         ? { ...item, approval_status: 'approved' as const } 
@@ -103,12 +107,17 @@ export const ResultsProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const approveMultiple = useCallback((ids: string[]) => {
+    const validIds = ids.filter(id => id && id !== '');
+    if (validIds.length === 0) {
+      console.error('[Results] Nenhum ID válido para aprovar');
+      return;
+    }
     setResults(prev => prev.map(item => 
-      ids.includes(item.id || '') 
+      validIds.includes(item.id || '') 
         ? { ...item, approval_status: 'approved' as const } 
         : item
     ));
-    toast.success(`${ids.length} músicas aprovadas!`);
+    toast.success(`${validIds.length} músicas aprovadas!`);
   }, []);
 
   const getPendingItems = useCallback(() => {
