@@ -6,6 +6,7 @@ interface WorkflowState {
 
 export interface WorkflowContextType extends WorkflowState {
   setSelectedTitles: (titles: string[]) => void;
+  reorderQueue: (newOrder: string[]) => void;
   getQueuedItems: (processedCount: number) => { id: string; titulo: string; artista: string; fonte: string }[];
 }
 
@@ -23,11 +24,17 @@ export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
     }));
   }, [selectedTitles]);
 
+  const reorderQueue = useCallback((newOrder: string[]) => {
+    console.log('[Workflow] Reordenando fila:', newOrder.length, 'itens');
+    setSelectedTitles(newOrder);
+  }, []);
+
   return (
     <WorkflowContext.Provider
       value={{
         selectedTitles,
         setSelectedTitles,
+        reorderQueue,
         getQueuedItems,
       }}
     >
