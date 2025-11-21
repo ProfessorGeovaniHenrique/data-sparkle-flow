@@ -186,11 +186,11 @@ REGRAS CRÍTICAS:
     const userPrompt = `Escreva uma biografia para o artista musical: ${artistName}`;
 
     console.log(`📡 [Perplexity] Sending request to API...`);
-    console.log(`📡 [Perplexity] Model: llama-3.1-sonar-small-128k-online`);
+    console.log(`📡 [Perplexity] Model: sonar`);
     console.log(`📡 [Perplexity] Endpoint: https://api.perplexity.ai/chat/completions`);
     
     const requestBody = {
-      model: 'llama-3.1-sonar-small-128k-online',
+      model: 'sonar',
       messages: [
         {
           role: 'system',
