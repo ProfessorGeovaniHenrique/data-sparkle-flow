@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-// @ts-ignore - react-window types issue
-import { FixedSizeList } from 'react-window';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search, ChevronLeft, ChevronRight, Edit2, Check, X as XIcon } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,7 +33,7 @@ export const VirtualizedInboxTable = ({ items }: VirtualizedInboxTableProps) => 
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<any>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const filteredData = useMemo(() => {
     if (!searchTerm.trim()) return items;
@@ -48,6 +47,14 @@ export const VirtualizedInboxTable = ({ items }: VirtualizedInboxTableProps) => 
 
   const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
   const paginatedItems = filteredData.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  // Virtualizer
+  const rowVirtualizer = useVirtualizer({
+    count: paginatedItems.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 5,
+  });
 
   useEffect(() => {
     setCurrentPage(1);
@@ -128,164 +135,12 @@ export const VirtualizedInboxTable = ({ items }: VirtualizedInboxTableProps) => 
 
   const getRowHighlight = (item: EnrichedMusicData) => {
     if (item.status_pesquisa === 'Parcial' || item.ano_lancamento === '0000') {
-      return 'bg-yellow-50 hover:bg-yellow-100 dark:bg-yellow-950/20';
+      return 'bg-yellow-50 dark:bg-yellow-950/20';
     }
     if (item.status_pesquisa === 'Sucesso' || item.status_pesquisa === 'Sucesso (Web)') {
-      return 'bg-green-50/50 hover:bg-green-100/50 dark:bg-green-950/10';
+      return 'bg-green-50/50 dark:bg-green-950/10';
     }
-    return 'bg-red-50/30 hover:bg-red-100/30 dark:bg-red-950/10';
-  };
-
-  // Componente de linha virtualizada
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
-    const item = paginatedItems[index];
-    const rowId = item.id || `row-${index}`;
-
-    return (
-      <div style={style} className={cn('flex items-center border-b px-4', getRowHighlight(item))}>
-        {/* Checkbox */}
-        <div className="w-12 flex-shrink-0">
-          <Checkbox
-            checked={selectedIds.includes(rowId)}
-            onCheckedChange={() => toggleSelection(rowId)}
-          />
-        </div>
-
-        {/* Título */}
-        <div className="w-[25%] flex-shrink-0 pr-4 font-medium truncate">
-          {item.titulo_original}
-        </div>
-
-        {/* Artista - Editável */}
-        <div className="w-[18%] flex-shrink-0 pr-4">
-          {editingCell?.rowId === rowId && editingCell?.field === 'artista_encontrado' ? (
-            <div className="flex items-center gap-1">
-              <Input
-                ref={inputRef}
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={saveEdit}
-                onKeyDown={handleKeyDown}
-                className="h-8 text-sm"
-              />
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
-                <Check className="w-4 h-4 text-green-600" />
-              </Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
-                <XIcon className="w-4 h-4 text-red-600" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
-                item.artista_encontrado === 'Não Identificado' && "bg-yellow-100 dark:bg-yellow-950/30"
-              )}
-              onClick={() => startEditing(rowId, 'artista_encontrado', item.artista_encontrado)}
-            >
-              <span className="truncate">{item.artista_encontrado}</span>
-              <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
-            </div>
-          )}
-        </div>
-
-        {/* Compositor - Editável */}
-        <div className="w-[18%] flex-shrink-0 pr-4">
-          {editingCell?.rowId === rowId && editingCell?.field === 'compositor_encontrado' ? (
-            <div className="flex items-center gap-1">
-              <Input
-                ref={inputRef}
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={saveEdit}
-                onKeyDown={handleKeyDown}
-                className="h-8 text-sm"
-              />
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
-                <Check className="w-4 h-4 text-green-600" />
-              </Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
-                <XIcon className="w-4 h-4 text-red-600" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
-                item.compositor_encontrado === 'Não Identificado' && "bg-yellow-100 dark:bg-yellow-950/30"
-              )}
-              onClick={() => startEditing(rowId, 'compositor_encontrado', item.compositor_encontrado)}
-            >
-              <span className="truncate">{item.compositor_encontrado}</span>
-              <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
-            </div>
-          )}
-        </div>
-
-        {/* Ano - Editável */}
-        <div className="w-[10%] flex-shrink-0 pr-4">
-          {editingCell?.rowId === rowId && editingCell?.field === 'ano_lancamento' ? (
-            <div className="flex items-center gap-1">
-              <Input
-                ref={inputRef}
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={saveEdit}
-                onKeyDown={handleKeyDown}
-                className="h-8 text-sm w-20"
-                maxLength={4}
-              />
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
-                <Check className="w-4 h-4 text-green-600" />
-              </Button>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
-                <XIcon className="w-4 h-4 text-red-600" />
-              </Button>
-            </div>
-          ) : (
-            <div
-              className={cn(
-                "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
-                item.ano_lancamento === '0000' && "bg-yellow-100 dark:bg-yellow-950/30"
-              )}
-              onClick={() => startEditing(rowId, 'ano_lancamento', item.ano_lancamento === '0000' ? '' : item.ano_lancamento)}
-            >
-              <span>{item.ano_lancamento === '0000' ? '-' : item.ano_lancamento}</span>
-              <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
-            </div>
-          )}
-        </div>
-
-        {/* Status */}
-        <div className="w-[10%] flex-shrink-0 pr-4">
-          {item.status_pesquisa === 'Sucesso' || item.status_pesquisa === 'Sucesso (Web)' ? (
-            <Badge variant="default" className="gap-1 bg-green-500/10 text-green-700 border-green-500/20">
-              Sucesso
-            </Badge>
-          ) : item.status_pesquisa === 'Parcial' ? (
-            <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-700 border-yellow-500/20">
-              Parcial
-            </Badge>
-          ) : (
-            <Badge variant="destructive" className="gap-1">
-              Falha
-            </Badge>
-          )}
-        </div>
-
-        {/* Ações */}
-        <div className="w-[12%] flex-shrink-0">
-          <Button
-            size="sm"
-            variant="outline"
-            className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-            onClick={() => approveItem(rowId)}
-          >
-            Aprovar
-          </Button>
-        </div>
-      </div>
-    );
+    return 'bg-red-50/30 dark:bg-red-950/10';
   };
 
   return (
@@ -344,21 +199,185 @@ export const VirtualizedInboxTable = ({ items }: VirtualizedInboxTableProps) => 
         </div>
 
         {/* Lista virtualizada */}
-        <div className="border rounded-md">
+        <div 
+          ref={parentRef}
+          className="border rounded-md overflow-auto"
+          style={{ height: '600px' }}
+        >
           {paginatedItems.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               {searchTerm ? `Nenhum resultado para "${searchTerm}"` : 'Nenhuma música para revisar'}
             </div>
           ) : (
-            <FixedSizeList
-              ref={listRef}
-              height={600}
-              itemCount={paginatedItems.length}
-              itemSize={ROW_HEIGHT}
-              width="100%"
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: '100%',
+                position: 'relative',
+              }}
             >
-              {Row}
-            </FixedSizeList>
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const item = paginatedItems[virtualRow.index];
+                const rowId = item.id || `row-${virtualRow.index}`;
+                
+                return (
+                  <div
+                    key={virtualRow.key}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                    className={cn('flex items-center border-b px-4', getRowHighlight(item))}
+                  >
+                    {/* Checkbox */}
+                    <div className="w-12 flex-shrink-0">
+                      <Checkbox
+                        checked={selectedIds.includes(rowId)}
+                        onCheckedChange={() => toggleSelection(rowId)}
+                      />
+                    </div>
+
+                    {/* Título */}
+                    <div className="w-[25%] flex-shrink-0 pr-4 font-medium truncate">
+                      {item.titulo_original}
+                    </div>
+
+                    {/* Artista - Editável */}
+                    <div className="w-[18%] flex-shrink-0 pr-4">
+                      {editingCell?.rowId === rowId && editingCell?.field === 'artista_encontrado' ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            ref={inputRef}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={saveEdit}
+                            onKeyDown={handleKeyDown}
+                            className="h-8 text-sm"
+                          />
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                            <Check className="w-4 h-4 text-green-600" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                            <XIcon className="w-4 h-4 text-red-600" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
+                            item.artista_encontrado === 'Não Identificado' && "bg-yellow-100 dark:bg-yellow-950/30"
+                          )}
+                          onClick={() => startEditing(rowId, 'artista_encontrado', item.artista_encontrado)}
+                        >
+                          <span className="truncate">{item.artista_encontrado}</span>
+                          <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Compositor - Editável */}
+                    <div className="w-[18%] flex-shrink-0 pr-4">
+                      {editingCell?.rowId === rowId && editingCell?.field === 'compositor_encontrado' ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            ref={inputRef}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={saveEdit}
+                            onKeyDown={handleKeyDown}
+                            className="h-8 text-sm"
+                          />
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                            <Check className="w-4 h-4 text-green-600" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                            <XIcon className="w-4 h-4 text-red-600" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
+                            item.compositor_encontrado === 'Não Identificado' && "bg-yellow-100 dark:bg-yellow-950/30"
+                          )}
+                          onClick={() => startEditing(rowId, 'compositor_encontrado', item.compositor_encontrado)}
+                        >
+                          <span className="truncate">{item.compositor_encontrado}</span>
+                          <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Ano - Editável */}
+                    <div className="w-[10%] flex-shrink-0 pr-4">
+                      {editingCell?.rowId === rowId && editingCell?.field === 'ano_lancamento' ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            ref={inputRef}
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onBlur={saveEdit}
+                            onKeyDown={handleKeyDown}
+                            className="h-8 text-sm w-20"
+                            maxLength={4}
+                          />
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={saveEdit}>
+                            <Check className="w-4 h-4 text-green-600" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={cancelEditing}>
+                            <XIcon className="w-4 h-4 text-red-600" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 group cursor-pointer hover:bg-muted/50 rounded px-2 py-1",
+                            item.ano_lancamento === '0000' && "bg-yellow-100 dark:bg-yellow-950/30"
+                          )}
+                          onClick={() => startEditing(rowId, 'ano_lancamento', item.ano_lancamento === '0000' ? '' : item.ano_lancamento)}
+                        >
+                          <span>{item.ano_lancamento === '0000' ? '-' : item.ano_lancamento}</span>
+                          <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Status */}
+                    <div className="w-[10%] flex-shrink-0 pr-4">
+                      {item.status_pesquisa === 'Sucesso' || item.status_pesquisa === 'Sucesso (Web)' ? (
+                        <Badge variant="default" className="gap-1 bg-green-500/10 text-green-700 border-green-500/20">
+                          Sucesso
+                        </Badge>
+                      ) : item.status_pesquisa === 'Parcial' ? (
+                        <Badge variant="outline" className="gap-1 bg-yellow-500/10 text-yellow-700 border-yellow-500/20">
+                          Parcial
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="gap-1">
+                          Falha
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Ações */}
+                    <div className="w-[12%] flex-shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                        onClick={() => approveItem(rowId)}
+                      >
+                        Aprovar
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 
