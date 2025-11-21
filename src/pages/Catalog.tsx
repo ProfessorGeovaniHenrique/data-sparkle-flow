@@ -189,6 +189,43 @@ export default function Catalog() {
     }
   };
 
+  // Função para excluir um artista e suas músicas
+  const handleDeleteArtist = async (artistId: string, artistName: string) => {
+    try {
+      // Primeiro, excluir todas as músicas do artista
+      const { error: songsError } = await supabase
+        .from('songs')
+        .delete()
+        .eq('artist_id', artistId);
+      
+      if (songsError) throw songsError;
+      
+      // Depois, excluir o artista
+      const { error: artistError } = await supabase
+        .from('artists')
+        .delete()
+        .eq('id', artistId);
+      
+      if (artistError) throw artistError;
+      
+      toast.success(`Artista "${artistName}" e suas músicas foram excluídos`);
+      
+      // Fechar sheet se estava aberto
+      if (selectedArtistId === artistId) {
+        setIsSheetOpen(false);
+        setSelectedArtistId(null);
+      }
+      
+      // Invalidar queries para atualizar a lista
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      queryClient.invalidateQueries({ queryKey: ['song-stats'] });
+      
+    } catch (error: any) {
+      console.error('[Delete] Error:', error);
+      toast.error(`Erro ao excluir artista: ${error.message}`);
+    }
+  };
+
   // Filtrar e ordenar artistas
   const filteredAndSortedArtists = useMemo(() => {
     if (!artists) return [];
@@ -331,6 +368,7 @@ export default function Catalog() {
                   enrichedPercentage={enrichedPercentage}
                   onViewDetails={() => handleViewDetails(artist.id)}
                   onEnrich={() => handleEnrichArtist(artist.id)}
+                  onDelete={() => handleDeleteArtist(artist.id, artist.name)}
                 />
               );
             })}
