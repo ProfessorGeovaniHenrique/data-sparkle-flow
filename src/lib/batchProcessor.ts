@@ -44,10 +44,13 @@ export class BatchProcessor {
   }
 
   private async processWithRetry(batch: ParsedMusic[], batchNumber: number): Promise<EnrichedMusicData[]> {
+    console.log('[BatchProcessor] processWithRetry - Batch', batchNumber, 'com', batch.length, 'items');
     let lastError: Error | null = null;
     
     for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
       try {
+        console.log('[BatchProcessor] Tentativa', attempt, '/', this.MAX_RETRIES, 'para batch', batchNumber);
+        
         if (attempt > 1) {
           this.context.addError({
             timestamp: new Date().toISOString(),
@@ -57,32 +60,47 @@ export class BatchProcessor {
           });
         }
         
+        console.log('[BatchProcessor] Chamando processBatch para batch', batchNumber);
         const results = await this.processBatch(batch);
+        console.log('[BatchProcessor] processBatch retornou', results.length, 'resultados para batch', batchNumber);
         return results;
         
       } catch (error) {
+        console.error('[BatchProcessor] ERRO na tentativa', attempt, 'do batch', batchNumber, ':', error);
         lastError = error instanceof Error ? error : new Error(String(error));
         
         if (attempt < this.MAX_RETRIES) {
           const delay = this.INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-          console.warn(`Tentativa ${attempt} falhou. Aguardando ${delay}ms antes de retry...`);
+          console.warn(`[BatchProcessor] Tentativa ${attempt} falhou. Aguardando ${delay}ms antes de retry...`);
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
     }
     
+    console.error('[BatchProcessor] Todas as tentativas falharam para batch', batchNumber);
     throw new Error(`Falha após ${this.MAX_RETRIES} tentativas: ${lastError?.message}`);
   }
 
   async start() {
-    if (this.isRunning) return;
+    console.log('[BatchProcessor] start() chamado');
+    console.log('[BatchProcessor] isRunning:', this.isRunning);
+    console.log('[BatchProcessor] context.status:', this.context.status);
+    
+    if (this.isRunning) {
+      console.warn('[BatchProcessor] Já está rodando, abortando');
+      return;
+    }
     
     this.isRunning = true;
     this.context.setStatus('enriching');
+    console.log('[BatchProcessor] Status definido para enriching');
+    
     this.results = [];
     this.currentIndex = 0;
 
     const totalBatches = Math.ceil(this.items.length / this.batchSize);
+    console.log('[BatchProcessor] Total de batches:', totalBatches);
+    console.log('[BatchProcessor] Batch size:', this.batchSize);
 
     try {
       const startTime = Date.now();
@@ -90,13 +108,22 @@ export class BatchProcessor {
       let lastUpdateIndex = 0;
 
       while (this.currentIndex < this.items.length) {
+        console.log('[BatchProcessor] Loop - currentIndex:', this.currentIndex, '/ total:', this.items.length);
+        console.log('[BatchProcessor] Status atual:', this.context.status);
+        
         // Aguarda enquanto pausado
         while (this.context.status === 'paused') {
+          console.log('[BatchProcessor] PAUSADO - aguardando...');
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         
         // Para se cancelado (status volta para idle)
-        if (this.context.status === 'idle') break;
+        if (this.context.status === 'idle') {
+          console.log('[BatchProcessor] Status IDLE detectado - parando');
+          break;
+        }
+
+        console.log('[BatchProcessor] Criando', this.CONCURRENCY, 'batches em paralelo');
 
         // Process up to CONCURRENCY batches in parallel
         const batchPromises: Promise<void>[] = [];
@@ -106,10 +133,14 @@ export class BatchProcessor {
           const batch = this.items.slice(batchStart, batchStart + this.batchSize);
           const batchNumber = Math.floor(batchStart / this.batchSize) + 1;
           
+          console.log('[BatchProcessor] Batch', batchNumber, '- Itens:', batch.length, '(índices', batchStart, '-', batchStart + batch.length - 1, ')');
+          
           this.currentIndex += batch.length;
           
           const batchPromise = this.processWithRetry(batch, batchNumber)
             .then(batchResults => {
+              console.log('[BatchProcessor] Batch', batchNumber, 'concluído - Resultados:', batchResults.length);
+              
               // Mark as pending by default (inbox)
               const enrichedResults = batchResults.map(r => ({
                 ...r,
@@ -120,6 +151,8 @@ export class BatchProcessor {
               this.context.setResults([...this.results]);
             })
             .catch(batchError => {
+              console.error('[BatchProcessor] ERRO no batch', batchNumber, ':', batchError);
+              
               this.context.addError({
                 timestamp: new Date().toISOString(),
                 message: `Falha no lote ${batchNumber}/${totalBatches}`,
@@ -146,8 +179,12 @@ export class BatchProcessor {
           batchPromises.push(batchPromise);
         }
         
+        console.log('[BatchProcessor] Aguardando', batchPromises.length, 'batches em paralelo');
+        
         // Wait for all parallel batches to complete
         await Promise.all(batchPromises);
+        
+        console.log('[BatchProcessor] Batches concluídos');
         
         const now = Date.now();
         const elapsedSinceLastUpdate = (now - lastUpdateTime) / 1000;
@@ -175,12 +212,15 @@ export class BatchProcessor {
         }
       }
 
+      console.log('[BatchProcessor] Loop concluído - Processamento finalizado');
+      
       if (this.context.status !== 'idle') {
         this.context.setStatus('completed');
+        console.log('[BatchProcessor] Status definido para completed');
       }
 
     } catch (criticalError) {
-      console.error('Critical error in batch processor:', criticalError);
+      console.error('[BatchProcessor] ERRO CRÍTICO:', criticalError);
       this.context.addError({
         timestamp: new Date().toISOString(),
         message: 'Erro crítico no processamento',
@@ -190,6 +230,7 @@ export class BatchProcessor {
       this.context.setStatus('idle');
     } finally {
       this.isRunning = false;
+      console.log('[BatchProcessor] isRunning = false');
     }
 
     return this.results;

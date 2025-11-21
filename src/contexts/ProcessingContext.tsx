@@ -166,11 +166,13 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const reset = useCallback(() => {
+    console.log('[ProcessingContext] reset() chamado');
     setStatus('idle');
     setProgressState(initialProgress);
     setErrors([]);
     setSelectedTitles([]);
     setResults([]);
+    console.log('[ProcessingContext] Status resetado para idle');
   }, []);
 
   const clearSavedState = useCallback(() => {

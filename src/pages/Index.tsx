@@ -68,20 +68,28 @@ const IndexContent = () => {
     processingContext.reset();
 
     const processBatchFn = async (batch: ParsedMusic[]): Promise<EnrichedMusicData[]> => {
+      console.log('[Index] processBatchFn chamado com', batch.length, 'items');
       const payload = batch.map(m => ({ id: m.id, titulo: m.titulo, artista_contexto: m.artista }));
+      console.log('[Index] Payload criado:', payload.slice(0, 2)); // Primeiros 2 para não poluir o log
 
+      console.log('[Index] Invocando supabase.functions.invoke("enrich-music-data")...');
       const { data, error } = await supabase.functions.invoke('enrich-music-data', {
         body: { musics: payload }
       });
 
+      console.log('[Index] Resposta recebida - data:', !!data, 'error:', !!error);
+
       if (error) {
+        console.error('[Index] Edge Function error:', error);
         throw new Error(`Edge Function error: ${error.message}`);
       }
 
       if (!data || !data.results || !Array.isArray(data.results)) {
+        console.error('[Index] Resposta inválida:', data);
         throw new Error("Invalid response format from enrichment function.");
       }
 
+      console.log('[Index] Retornando', data.results.length, 'resultados');
       return data.results as EnrichedMusicData[];
     };
 
@@ -95,8 +103,9 @@ const IndexContent = () => {
       processingContext
     );
 
-    toast.info("Iniciando processamento em lotes. Seu progresso será salvo automaticamente.");
-    processorRef.current.start();
+        toast.info("Iniciando processamento em lotes. Seu progresso será salvo automaticamente.");
+        await processorRef.current.start();
+        console.log('[Index] BatchProcessor.start() concluído');
   };
 
   const handleRetryFailed = (failedItems: string[]) => {
