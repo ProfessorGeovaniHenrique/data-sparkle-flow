@@ -211,7 +211,7 @@ serve(async (req) => {
           if (needsWebResearch) {
             console.log(`Acionando fallback de pesquisa web para: ${music.titulo}`);
             try {
-              const webData = await searchWithPerplexity(music.titulo, music.artista);
+              const webData = await searchWithAI(music.titulo, music.artista);
               
               // Mesclar dados da web com dados existentes
               if (webData.compositor && webData.compositor !== 'Não Identificado') {
@@ -744,15 +744,15 @@ async function searchYouTube(
 }
 // ========================================================
 
-async function searchWithPerplexity(titulo: string, artista?: string): Promise<{ compositor: string; ano: string; fonte?: string }> {
-  const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY');
-  if (!PERPLEXITY_API_KEY) {
-    console.warn('PERPLEXITY_API_KEY não configurada. Pulando pesquisa web.');
+async function searchWithAI(titulo: string, artista?: string): Promise<{ compositor: string; ano: string; fonte?: string }> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    console.warn('LOVABLE_API_KEY não configurada. Pulando pesquisa com IA.');
     return { compositor: 'Não Identificado', ano: '0000' };
   }
 
   const artistaInfo = artista ? ` do artista "${artista}"` : '';
-  const searchPrompt = `Pesquise na web informações precisas sobre a música "${titulo}"${artistaInfo}. 
+  const searchPrompt = `Pesquise em seu conhecimento informações precisas sobre a música "${titulo}"${artistaInfo}. 
   
 Preciso encontrar:
 1. O compositor (ou compositores) ORIGINAL(is) da música
@@ -760,26 +760,26 @@ Preciso encontrar:
 
 IMPORTANTE:
 - Se for um cover/regravação, quero os dados da versão ORIGINAL
-- Retorne APENAS informações verificáveis
-- Se não encontrar, retorne "Não Identificado" para compositor e "0000" para ano
+- Retorne APENAS informações verificáveis que você conhece
+- Se não tiver certeza, retorne "Não Identificado" para compositor e "0000" para ano
 - Foque em música brasileira, especialmente forró, piseiro, sertanejo
 
 Retorne APENAS um JSON válido com esta estrutura exata:
 {
   "compositor": "Nome do Compositor",
   "ano": "YYYY",
-  "fonte": "Nome da fonte onde encontrou (ex: Wikipedia, Dicionário Cravo Albin)"
+  "fonte": "IA Generativa"
 }`;
 
   try {
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'sonar',
+        model: 'google/gemini-2.5-flash',
         messages: [
           {
             role: 'system',
@@ -790,14 +790,14 @@ Retorne APENAS um JSON válido com esta estrutura exata:
             content: searchPrompt
           }
         ],
-        temperature: 0.2,
+        temperature: 0.3,
         max_tokens: 500
       }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Perplexity API error:', response.status, errorText);
+      console.error('Lovable AI error:', response.status, errorText);
       return { compositor: 'Não Identificado', ano: '0000' };
     }
 
@@ -805,7 +805,7 @@ Retorne APENAS um JSON válido com esta estrutura exata:
     const content = data.choices?.[0]?.message?.content;
     
     if (!content) {
-      console.warn('Nenhum conteúdo retornado pela Perplexity');
+      console.warn('Nenhum conteúdo retornado pela IA');
       return { compositor: 'Não Identificado', ano: '0000' };
     }
 
@@ -820,11 +820,11 @@ Retorne APENAS um JSON válido com esta estrutura exata:
       };
     }
 
-    console.warn('Não foi possível extrair JSON da resposta da Perplexity:', content);
+    console.warn('Não foi possível extrair JSON da resposta da IA:', content);
     return { compositor: 'Não Identificado', ano: '0000' };
 
   } catch (error) {
-    console.error('Erro na pesquisa com Perplexity:', error);
+    console.error('Erro na pesquisa com IA:', error);
     return { compositor: 'Não Identificado', ano: '0000' };
   }
 }

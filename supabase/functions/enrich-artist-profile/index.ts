@@ -39,30 +39,20 @@ serve(async (req) => {
       biographySource = 'wikipedia';
       console.log(`✅ Wikipedia biography found for ${artistName}`);
     } else {
-      // Step 2: Try Perplexity Web Search
-      console.log(`⏭️ Wikipedia not found, proceeding to Step 2: Perplexity web search`);
-      const perplexityBio = await fetchPerplexityBiography(artistName);
+      // Step 2: Fallback to Lovable AI (Gemini)
+      console.log(`⏭️ Wikipedia not found, proceeding to Lovable AI (Gemini) fallback`);
+      const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
       
-      if (perplexityBio && perplexityBio !== 'Informações não encontradas') {
-        biography = `${perplexityBio}\n\n(Fonte: Pesquisa Web)`;
-        biographySource = 'web';
-        console.log(`✅ Step 2 SUCCESS: Perplexity biography found for ${artistName}`);
-      } else {
-        // Step 3: Final fallback to Lovable AI (Gemini)
-        console.log(`⏭️ Perplexity unsuccessful, proceeding to Step 3: Lovable AI (Gemini) fallback`);
-        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-        
-        if (!LOVABLE_API_KEY) {
-          console.error('❌ LOVABLE_API_KEY not configured - cannot proceed with fallback');
-          throw new Error('LOVABLE_API_KEY is not configured');
-        }
-
-        console.log('✓ Lovable API key found, calling AI...');
-        const aiBio = await fetchAIBiography(artistName, LOVABLE_API_KEY);
-        biography = `${aiBio}\n\n(Fonte: IA Generativa)`;
-        biographySource = 'ai';
-        console.log(`✅ Step 3 COMPLETE: AI biography generated for ${artistName}`);
+      if (!LOVABLE_API_KEY) {
+        console.error('❌ LOVABLE_API_KEY not configured - cannot proceed with fallback');
+        throw new Error('LOVABLE_API_KEY is not configured');
       }
+
+      console.log('✓ Lovable API key found, calling AI...');
+      const aiBio = await fetchAIBiography(artistName, LOVABLE_API_KEY);
+      biography = `${aiBio}\n\n(Fonte: IA Generativa)`;
+      biographySource = 'ai';
+      console.log(`✅ AI biography generated for ${artistName}`);
     }
 
     // Update artist record in database
@@ -152,132 +142,6 @@ async function fetchWikipediaBio(artistName: string): Promise<string | null> {
   }
 }
 
-/**
- * Intermediate Fallback: Use Perplexity to search the web for artist information
- */
-async function fetchPerplexityBiography(artistName: string): Promise<string | null> {
-  console.log(`🔍 [Perplexity] Starting web search for: ${artistName}`);
-  
-  const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY');
-  
-  if (!PERPLEXITY_API_KEY) {
-    console.warn('⚠️ [Perplexity] PERPLEXITY_API_KEY not configured, skipping web search');
-    return null;
-  }
-
-  console.log('✓ [Perplexity] API key found, proceeding with request');
-
-  try {
-    const systemPrompt = `Você é um jornalista musical especializado em música brasileira. Pesquise na web sobre o artista/banda indicado e escreva uma biografia curta e objetiva (máximo 2-3 parágrafos).
-
-FOCO OBRIGATÓRIO:
-- Gênero musical principal
-- Origem (cidade/estado, se disponível)
-- Principais trabalhos, álbuns ou músicas conhecidas
-- Período de atividade ou carreira
-
-REGRAS CRÍTICAS:
-- Use APENAS informações encontradas na web atual
-- Se não encontrar NADA confiável sobre o artista, responda APENAS: "Informações não encontradas"
-- NÃO invente fatos, datas ou trabalhos
-- Seja conciso e factual
-- Escreva em Português do Brasil`;
-
-    const userPrompt = `Escreva uma biografia para o artista musical: ${artistName}`;
-
-    console.log(`📡 [Perplexity] Sending request to API...`);
-    console.log(`📡 [Perplexity] Model: sonar`);
-    console.log(`📡 [Perplexity] Endpoint: https://api.perplexity.ai/chat/completions`);
-    
-    const requestBody = {
-      model: 'sonar',
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: userPrompt
-        }
-      ],
-      temperature: 0.2,
-      top_p: 0.9,
-      max_tokens: 800,
-      return_images: false,
-      return_related_questions: false,
-      search_recency_filter: 'year'
-    };
-
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    console.log(`📊 [Perplexity] Response status: ${response.status}`);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ [Perplexity] API error (${response.status}):`, errorText);
-      
-      if (response.status === 401) {
-        console.error('❌ [Perplexity] Authentication failed - check API key');
-      } else if (response.status === 429) {
-        console.error('❌ [Perplexity] Rate limit exceeded');
-      } else if (response.status === 500) {
-        console.error('❌ [Perplexity] Server error');
-      }
-      
-      return null;
-    }
-
-    const data = await response.json();
-    console.log(`📦 [Perplexity] Response received, parsing data...`);
-    
-    // Log response structure for debugging
-    console.log(`📦 [Perplexity] Response has choices: ${!!data.choices}`);
-    console.log(`📦 [Perplexity] Choices count: ${data.choices?.length || 0}`);
-    
-    const biography = data.choices?.[0]?.message?.content;
-    
-    if (!biography) {
-      console.warn('⚠️ [Perplexity] No content returned in response');
-      console.log(`📦 [Perplexity] Full response structure:`, JSON.stringify(data, null, 2));
-      return null;
-    }
-
-    const cleanBio = biography.trim();
-    console.log(`📝 [Perplexity] Biography length: ${cleanBio.length} characters`);
-    console.log(`📝 [Perplexity] Biography preview: ${cleanBio.substring(0, 100)}...`);
-    
-    // Check if Perplexity couldn't find information
-    if (cleanBio.toLowerCase().includes('informações não encontradas')) {
-      console.log('ℹ️ [Perplexity] Artist not found in web search');
-      return null;
-    }
-    
-    if (cleanBio.length < 50) {
-      console.log('ℹ️ [Perplexity] Response too short, likely no information found');
-      return null;
-    }
-
-    console.log(`✅ [Perplexity] Successfully retrieved biography (${cleanBio.length} chars)`);
-    return cleanBio;
-
-  } catch (error) {
-    console.error('❌ [Perplexity] Exception caught:', error);
-    console.error('❌ [Perplexity] Error details:', {
-      name: error instanceof Error ? error.name : 'Unknown',
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
-    return null;
-  }
-}
 
 /**
  * Final Fallback: Use AI to generate biography with strict anti-hallucination prompt
