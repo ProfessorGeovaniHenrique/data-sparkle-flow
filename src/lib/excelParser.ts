@@ -298,32 +298,45 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             if (typeof cell !== 'string') return;
             const lowerCell = cell.toLowerCase().trim();
 
-            // Detecção expandida de coluna de música/título
-            if (lowerCell.includes('música') || lowerCell.includes('musica') || 
-                lowerCell.includes('titulo') || lowerCell.includes('título') ||
-                lowerCell === 'nome' || lowerCell.includes('faixa') || 
-                lowerCell.includes('track') || lowerCell.includes('song')) {
+            // PRIORIDADE 1: Detectar "letra" primeiro (mais específico)
+            if (lowerCell.includes('letra') || lowerCell.includes('lyric')) {
+              if (columnIndices.letra === undefined) {
+                columnIndices.letra = index;
+              }
+            }
+            
+            // PRIORIDADE 2: "Nome da música" tem precedência máxima para título
+            if ((lowerCell.includes('nome') && lowerCell.includes('musica')) ||
+                (lowerCell.includes('nome') && lowerCell.includes('música'))) {
               columnIndices.musica = index;
             }
-            // Detecção expandida de coluna de artista
-            else if (lowerCell.includes('artista') || lowerCell.includes('intérprete') ||
-                     lowerCell.includes('interprete') || lowerCell.includes('cantor') ||
-                     lowerCell.includes('autor') || lowerCell.includes('banda') ||
-                     lowerCell.includes('artist')) {
+            // Detecção de música/título - só se não for a coluna de letra e não tiver sido detectado ainda
+            else if (columnIndices.musica === undefined && 
+                     columnIndices.letra !== index &&
+                     (lowerCell.includes('música') || lowerCell.includes('musica') || 
+                      lowerCell.includes('titulo') || lowerCell.includes('título') ||
+                      lowerCell === 'nome' || lowerCell.includes('faixa') || 
+                      lowerCell.includes('track') || lowerCell.includes('song'))) {
+              columnIndices.musica = index;
+            }
+            
+            // Detecção de artista
+            if (lowerCell.includes('artista') || lowerCell.includes('intérprete') ||
+                lowerCell.includes('interprete') || lowerCell.includes('cantor') ||
+                lowerCell.includes('autor') || lowerCell.includes('banda') ||
+                lowerCell.includes('artist')) {
               columnIndices.artista = index;
             }
+            
             // Compositor
-            else if (lowerCell.includes('compositor') || lowerCell.includes('composer')) {
+            if (lowerCell.includes('compositor') || lowerCell.includes('composer')) {
               columnIndices.compositor = index;
             }
+            
             // Ano
-            else if (lowerCell.includes('ano') || lowerCell.includes('lançamento') || 
-                     lowerCell.includes('lancamento') || lowerCell.includes('year')) {
+            if (lowerCell.includes('ano') || lowerCell.includes('lançamento') || 
+                lowerCell.includes('lancamento') || lowerCell.includes('year')) {
               columnIndices.ano = index;
-            }
-            // Letra
-            else if (lowerCell.includes('letra') || lowerCell.includes('lyric')) {
-              columnIndices.letra = index;
             }
           });
 
