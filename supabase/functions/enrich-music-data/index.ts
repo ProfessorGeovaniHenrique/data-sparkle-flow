@@ -360,12 +360,12 @@ async function enrichSingleTitle(
   artistaEspecifico?: string,
   youtubeContext?: YouTubeSearchResult
 ) {
-  // Se artistaEspecifico foi passado (modo database), use contexto melhorado
+  // Construir contexto do artista
   const contextoArtista = artistaEspecifico 
     ? `\n\n**CONTEXTO IMPORTANTE**: Você está analisando músicas do artista "${artistaEspecifico}". Todas as respostas devem considerar este contexto específico.`
     : (artistaContexto ? `\nArtista de Contexto (se disponível): ${artistaContexto}` : '');
   
-  // Contexto do YouTube (se disponível)
+  // Construir contexto do YouTube (se disponível)
   let contextoYouTube = '';
   if (youtubeContext) {
     const publishYear = new Date(youtubeContext.publishDate).getFullYear();
@@ -392,36 +392,110 @@ ${youtubeContext.description.substring(0, 800)}${youtubeContext.description.leng
 `;
   }
   
-  const prompt = `Você é um especialista em musicologia brasileira e catalogação de dados fonográficos, com foco profundo em gêneros nordestinos como Forró, Piseiro, Baião, Xote e Arrocha. Sua tarefa é atuar como um enriquecedor de metadados musicais de alta precisão.
+  const prompt = `Atue como um arquivista musical especialista em música brasileira, com profundo conhecimento em gêneros nordestinos (Forró, Piseiro, Baião, Xote, Arrocha).
+
+**ENTRADA:**
 
 Música: "${titulo}"${contextoArtista}${contextoYouTube}
 
-Para esta música, você deve realizar uma pesquisa mental em sua base de conhecimento para encontrar os dados mais precisos e retornar informações padronizadas.
+**TAREFA:**
+Analise os dados fornecidos e o contexto do YouTube (se houver) para determinar com precisão:
+1. **Artista/Intérprete** da versão analisada
+2. **Compositor(es)** original(is) da obra
+3. **Ano de Lançamento** original da música (não do vídeo)
 
-REGRAS CRÍTICAS DE PROCESSAMENTO:
+**REGRAS CRÍTICAS:**
 
-• Contexto de Gênero é Prioritário: Assuma sempre que as músicas pertencem ao universo do Forró/Piseiro/Sertanejo, a menos que seja impossível. Se o título for genérico (ex: "Tempo Perdido"), busque a versão de forró mais famosa, não a original de rock.
+1. **Contexto de Gênero:** Priorize o universo do Forró/Piseiro/Sertanejo Nordestino
+2. **Covers:** Se for regravação, retorne o intérprete da versão + compositor original
+3. **Créditos YouTube:** DÊ PRIORIDADE aos créditos oficiais na descrição do vídeo
+4. **Ano de Lançamento:** Busque o ano ORIGINAL da música, não da data de upload do vídeo (exceto se for vídeo oficial de lançamento)
+5. **Formato de Ano:** APENAS 4 dígitos (ex: "2015"). Use "0000" se desconhecido
+6. **Dados Ausentes:** Use "Não Identificado" se não tiver certeza. NÃO invente
 
-• Tratamento de Covers (Regravações):
-  - Se a música for um cover claro de outro gênero (ex: "Vagalumes" do Polentinha do Arrocha, original do Luan Santana):
-    * artista: O artista da versão de forró/arrocha (ex: "Polentinha do Arrocha")
-    * compositor: O compositor original (ex: "Luan Santana")
-    * observacoes: "Cover de [Artista Original]"
+**FORMATO DE RESPOSTA (JSON Puro, sem markdown):**
+{
+  "artista": "Nome do Intérprete",
+  "compositor": "Nome(s) do(s) Compositor(es)",
+  "ano": "YYYY",
+  "observacoes": "Breve explicação de onde tirou a informação (ex: 'Descrição do vídeo oficial')"
+}`;
 
-• Padronização de Nomes:
-  - Use sempre "Nome Sobrenome" (ex: "Luiz Gonzaga"), nunca "Sobrenome, Nome"
-  - Mantenha a capitalização correta (Title Case)
+  // ============ USAR GEMINI 1.5 PRO DIRETAMENTE ============
+  const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+  
+  if (GEMINI_API_KEY) {
+    console.log('🧠 [Gemini Pro] Usando API própria do Google Gemini 1.5 Pro');
+    
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${GEMINI_API_KEY}`;
+      
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: prompt
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'object',
+              properties: {
+                artista: { type: 'string' },
+                compositor: { type: 'string' },
+                ano: { type: 'string' },
+                observacoes: { type: 'string' }
+              },
+              required: ['artista', 'compositor', 'ano']
+            }
+          }
+        }),
+      });
 
-• Formato de Data Rígido:
-  - O campo ano DEVE conter APENAS 4 dígitos numéricos (ex: 2020)
-  - NÃO use: 20/01/2020, cerca de 2020, anos 90, desconhecido
-  - Se não souber o ano exato, tente estimar a década (ex: 1990)
-  - Se for impossível, retorne "0000"
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ [Gemini Pro] API error:', response.status, errorText);
+        throw new Error(`Gemini API error: ${response.status}`);
+      }
 
-• Tratamento de Dados Ausentes: Se não encontrar o artista ou compositor com certeza, retorne "Não Identificado". NÃO invente dados.
+      const data = await response.json();
+      const textContent = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (!textContent) {
+        throw new Error('Gemini response sem conteúdo de texto');
+      }
 
-Seja preciso e consistente. Use seu conhecimento sobre música nordestina brasileira.`;
-
+      // Parse JSON response
+      const parsed = JSON.parse(textContent);
+      console.log('✅ [Gemini Pro] Metadata extraída com sucesso');
+      
+      return {
+        artista: parsed.artista || 'Não Identificado',
+        compositor: parsed.compositor || 'Não Identificado',
+        ano: parsed.ano || '0000',
+        observacoes: parsed.observacoes || ''
+      };
+      
+    } catch (geminiError) {
+      console.error('❌ [Gemini Pro] Erro, fazendo fallback para Lovable AI:', geminiError);
+      // Continua para fallback abaixo
+    }
+  }
+  
+  // ============ FALLBACK: LOVABLE AI GATEWAY ============
+  console.log('🔄 [Fallback] Usando Lovable AI Gateway');
+  
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
     headers: {
