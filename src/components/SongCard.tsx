@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Sparkles, Youtube, Play } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles, Youtube, Play, Music } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -61,58 +61,83 @@ export function SongCard({
   return (
     <Card 
       className={cn(
-        "transition-all duration-300",
+        "transition-all duration-300 overflow-hidden",
         isRecentlyEnriched && "border-green-500 shadow-lg shadow-green-500/20 animate-scale-in"
       )}
     >
-      <CardHeader className="pb-3">
-        {/* Header: Título e Badges */}
-        <div className="space-y-2">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2 flex-1">
-              <h3 className="text-2xl font-bold leading-tight text-foreground">
-                {title || 'Título não identificado'}
-              </h3>
-              {youtubeUrl && (
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      "h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30",
-                      showVideo && "bg-red-50 dark:bg-red-950/30"
-                    )}
-                    onClick={() => setShowVideo(!showVideo)}
-                    title={showVideo ? "Ocultar player" : "Assistir no card"}
-                  >
-                    <Play className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                    onClick={() => window.open(youtubeUrl, '_blank')}
-                    title="Abrir no YouTube"
-                  >
-                    <Youtube className="w-5 h-5" />
-                  </Button>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <Badge className={statusInfo.color}>
-                {statusInfo.label}
-              </Badge>
-              {isRecentlyEnriched && (
-                <Badge variant="outline" className="border-green-500 text-green-600 animate-fade-in">
-                  <Sparkles className="w-3 h-3 mr-1" />
-                  Novo
-                </Badge>
-              )}
-            </div>
+      <div className="flex flex-col sm:flex-row">
+        {/* Thumbnail/Capa à Esquerda */}
+        <div className="relative w-full sm:w-32 h-32 shrink-0 bg-muted flex items-center justify-center">
+          {videoId ? (
+            <img 
+              src={`https://img.youtube.com/vi/${videoId}/mqdefault.jpg`}
+              alt={`Capa de ${title}`}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                // Fallback para ícone se a imagem falhar
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.querySelector('.fallback-icon')?.classList.remove('hidden');
+              }}
+            />
+          ) : null}
+          <div className={cn(
+            "fallback-icon absolute inset-0 flex items-center justify-center bg-muted",
+            videoId && "hidden"
+          )}>
+            <Music className="w-12 h-12 text-muted-foreground/40" />
           </div>
         </div>
-      </CardHeader>
+
+        {/* Conteúdo Principal */}
+        <div className="flex-1 flex flex-col">
+          <CardHeader className="pb-3">
+            {/* Header: Título e Badges */}
+            <div className="space-y-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2 flex-1">
+                  <h3 className="text-xl sm:text-2xl font-bold leading-tight text-foreground">
+                    {title || 'Título não identificado'}
+                  </h3>
+                  {youtubeUrl && (
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30",
+                          showVideo && "bg-red-50 dark:bg-red-950/30"
+                        )}
+                        onClick={() => setShowVideo(!showVideo)}
+                        title={showVideo ? "Ocultar player" : "Assistir no card"}
+                      >
+                        <Play className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        onClick={() => window.open(youtubeUrl, '_blank')}
+                        title="Abrir no YouTube"
+                      >
+                        <Youtube className="w-5 h-5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Badge className={statusInfo.color}>
+                    {statusInfo.label}
+                  </Badge>
+                  {isRecentlyEnriched && (
+                    <Badge variant="outline" className="border-green-500 text-green-600 animate-fade-in">
+                      <Sparkles className="w-3 h-3 mr-1" />
+                      Novo
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardHeader>
 
       <CardContent className="space-y-4">
         {/* Grid de Metadados */}
@@ -234,7 +259,9 @@ export function SongCard({
             </CollapsibleContent>
           </Collapsible>
         )}
-      </CardContent>
+        </CardContent>
+        </div>
+      </div>
     </Card>
   );
 }
