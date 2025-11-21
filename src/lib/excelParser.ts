@@ -12,11 +12,18 @@ export function parseExcelWithWorker(
       { type: 'module' }
     );
 
+    // Timeout de 30 segundos para prevenir travamento
+    const timeoutId = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('Timeout: O processamento do arquivo excedeu 30 segundos. Tente um arquivo menor ou divida-o em partes.'));
+    }, 30000);
+
     // Ler arquivo como ArrayBuffer
     const reader = new FileReader();
 
     reader.onload = (e) => {
       if (!e.target?.result) {
+        clearTimeout(timeoutId);
         reject(new Error('Falha ao ler arquivo'));
         return;
       }
@@ -30,6 +37,7 @@ export function parseExcelWithWorker(
     };
 
     reader.onerror = () => {
+      clearTimeout(timeoutId);
       reject(new Error('Erro ao ler arquivo'));
       worker.terminate();
     };
@@ -39,9 +47,11 @@ export function parseExcelWithWorker(
       const response = e.data;
 
       if (response.type === 'SUCCESS') {
+        clearTimeout(timeoutId);
         resolve(response.result);
         worker.terminate();
       } else if (response.type === 'ERROR') {
+        clearTimeout(timeoutId);
         reject(new Error(response.error));
         worker.terminate();
       } else if (response.type === 'PROGRESS' && onProgress) {
@@ -50,6 +60,7 @@ export function parseExcelWithWorker(
     };
 
     worker.onerror = (error) => {
+      clearTimeout(timeoutId);
       reject(new Error(`Worker error: ${error.message}`));
       worker.terminate();
     };

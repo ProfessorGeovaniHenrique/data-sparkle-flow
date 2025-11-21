@@ -67,6 +67,14 @@ const IndexContent = () => {
     console.log('[Index] Iniciando startBatchProcessing com:', musicsToProcess.length, 'músicas');
     console.log('[Index] Primeiras 3 músicas:', musicsToProcess.slice(0, 3));
     
+    // Cancelar processamento anterior se existir
+    if (processorRef.current) {
+      console.log('[Index] Cancelando processamento anterior...');
+      processingContext.cancel();
+      processorRef.current = null;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
     processingContext.reset();
     
     // Aguardar propagação do estado após reset
