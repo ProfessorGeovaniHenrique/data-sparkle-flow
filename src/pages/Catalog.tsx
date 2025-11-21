@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Music, Users, Loader2, Search, Upload } from 'lucide-react';
+import { Music, Users, Loader2, Search, Upload, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { ArtistCard } from '@/components/ArtistCard';
 import { SongCard } from '@/components/SongCard';
@@ -46,6 +47,7 @@ export default function Catalog() {
   const [sortBy, setSortBy] = useState<'name' | 'pending' | 'recent'>('name');
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [recentlyEnrichedIds, setRecentlyEnrichedIds] = useState<Set<string>>(new Set());
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const queryClient = useQueryClient();
 
   // Query para artistas
@@ -264,6 +266,57 @@ export default function Catalog() {
     }
   };
 
+  // Função para limpar todo o banco de dados
+  const handleDeleteAll = async () => {
+    setIsDeletingAll(true);
+    
+    try {
+      // Fechar sheet se estiver aberto
+      if (isSheetOpen) {
+        setIsSheetOpen(false);
+        setSelectedArtistId(null);
+      }
+
+      // Deletar na ordem correta devido às foreign keys
+      // 1. Deletar todas as músicas
+      const { error: songsError } = await supabase
+        .from('songs')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Deleta tudo
+      
+      if (songsError) throw songsError;
+      
+      // 2. Deletar todos os artistas
+      const { error: artistsError } = await supabase
+        .from('artists')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Deleta tudo
+      
+      if (artistsError) throw artistsError;
+      
+      // 3. Deletar todos os uploads
+      const { error: uploadsError } = await supabase
+        .from('uploads')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Deleta tudo
+      
+      if (uploadsError) throw uploadsError;
+      
+      toast.success('Banco de dados limpo com sucesso!');
+      
+      // Invalidar todas as queries
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      queryClient.invalidateQueries({ queryKey: ['song-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['songs'] });
+      
+    } catch (error: any) {
+      console.error('[Delete All] Error:', error);
+      toast.error(`Erro ao limpar banco: ${error.message}`);
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
+
   // Filtrar e ordenar artistas
   const filteredAndSortedArtists = useMemo(() => {
     if (!artists) return [];
@@ -344,10 +397,51 @@ export default function Catalog() {
               </p>
             </div>
             
-            <Button onClick={() => window.location.href = '/'}>
-              <Upload className="w-4 h-4 mr-2" />
-              Novo Upload
-            </Button>
+            <div className="flex gap-2">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" disabled={isDeletingAll}>
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {isDeletingAll ? 'Limpando...' : 'Limpar Banco'}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Tem certeza absoluta?</AlertDialogTitle>
+                    <AlertDialogDescription className="space-y-2">
+                      <p className="font-semibold text-destructive">
+                        Esta ação não pode ser desfeita!
+                      </p>
+                      <p>
+                        Isso irá excluir permanentemente:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Todos os {artists.length} artistas</li>
+                        <li>Todas as músicas do catálogo</li>
+                        <li>Todos os históricos de upload</li>
+                      </ul>
+                      <p className="text-sm mt-2">
+                        Você precisará importar novamente uma planilha para ter dados.
+                      </p>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDeleteAll}
+                      className="bg-destructive hover:bg-destructive/90"
+                    >
+                      Sim, excluir tudo
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
+              <Button onClick={() => window.location.href = '/'}>
+                <Upload className="w-4 h-4 mr-2" />
+                Novo Upload
+              </Button>
+            </div>
           </div>
 
           {/* Busca e Filtros */}
