@@ -214,7 +214,7 @@ const IndexContent = () => {
           <ErrorLog onRetry={handleRetryFailed} />
         )}
 
-        {enrichedData.length > 0 && <ProcessingDashboard />}
+        {(enrichedData.length > 0 || isProcessing) && <ProcessingDashboard />}
 
         {enrichedData.length > 0 && (
           <WorkflowTabs 
