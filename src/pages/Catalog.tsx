@@ -63,7 +63,7 @@ export default function Catalog() {
   });
 
   // Query para músicas do artista selecionado
-  const { data: songs, isLoading: loadingSongs } = useQuery({
+  const { data: songsRaw, isLoading: loadingSongs } = useQuery({
     queryKey: ['songs', selectedArtistId],
     queryFn: async () => {
       if (!selectedArtistId) return [];
@@ -72,13 +72,32 @@ export default function Catalog() {
         .from('songs')
         .select('*')
         .eq('artist_id', selectedArtistId)
-        .order('title');
+        .order('updated_at', { ascending: false });
       
       if (error) throw error;
       return data as Song[];
     },
-    enabled: !!selectedArtistId
+    enabled: !!selectedArtistId,
+    refetchOnMount: 'always' // Sempre buscar dados frescos ao abrir sheet
   });
+
+  // Ordenar músicas: enriquecidas primeiro, depois por data de atualização
+  const songs = useMemo(() => {
+    if (!songsRaw) return [];
+    
+    return [...songsRaw].sort((a, b) => {
+      // Prioridade 1: Status (enriched/approved > outros)
+      const aIsEnriched = a.status === 'enriched' || a.status === 'approved';
+      const bIsEnriched = b.status === 'enriched' || b.status === 'approved';
+      
+      if (aIsEnriched !== bIsEnriched) {
+        return aIsEnriched ? -1 : 1; // Enriquecidas primeiro
+      }
+      
+      // Prioridade 2: Mais recentes primeiro
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
+  }, [songsRaw]);
 
   // Query para contar músicas por artista e status
   const { data: songStats } = useQuery({
@@ -153,8 +172,10 @@ export default function Catalog() {
             );
           });
           
-          // Invalidar stats para atualizar cards
+          // Invalidar ambas queries para sincronizar contagens
+          console.log('[Query] Song atualizada via realtime, invalidando queries');
           queryClient.invalidateQueries({ queryKey: ['song-stats'] });
+          queryClient.invalidateQueries({ queryKey: ['songs', selectedArtistId] });
           
           toast.success(`"${payload.new.title}" atualizada!`);
         }
@@ -195,8 +216,10 @@ export default function Catalog() {
         { duration: 5000 }
       );
       
-      // Invalidar stats para atualizar cards
+      // Invalidar queries para atualizar cards E sheet
+      console.log('[Query] Invalidando song-stats e songs para artist:', artistId);
       queryClient.invalidateQueries({ queryKey: ['song-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['songs', artistId] });
       
     } catch (error: any) {
       console.error('[Enrichment] Error:', error);
