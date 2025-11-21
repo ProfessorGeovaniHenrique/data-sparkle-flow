@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Music, Users, Loader2, Search, Upload, Trash2 } from 'lucide-react';
+import { Music, Users, Loader2, Search, Upload, Trash2, List, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import { ArtistCard } from '@/components/ArtistCard';
@@ -49,6 +50,7 @@ export default function Catalog() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [recentlyEnrichedIds, setRecentlyEnrichedIds] = useState<Set<string>>(new Set());
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list');
   const queryClient = useQueryClient();
 
   // Query para artistas
@@ -101,6 +103,42 @@ export default function Catalog() {
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
   }, [songsRaw]);
+
+  // Agrupar músicas por ano para a visualização Timeline
+  const songsByYear = useMemo(() => {
+    if (!songs) return { years: [], unknown: [] };
+    
+    const grouped: Record<string, Song[]> = {};
+    const unknown: Song[] = [];
+    
+    songs.forEach(song => {
+      const year = song.release_year;
+      
+      if (!year || year === '0000' || year.trim() === '') {
+        unknown.push(song);
+      } else {
+        if (!grouped[year]) {
+          grouped[year] = [];
+        }
+        grouped[year].push(song);
+      }
+    });
+    
+    // Ordenar anos em ordem decrescente (mais recente primeiro)
+    const sortedYears = Object.keys(grouped).sort((a, b) => {
+      const yearA = parseInt(a);
+      const yearB = parseInt(b);
+      return yearB - yearA;
+    });
+    
+    return {
+      years: sortedYears.map(year => ({
+        year,
+        songs: grouped[year]
+      })),
+      unknown
+    };
+  }, [songs]);
 
   // Query para contar músicas por artista e status
   const { data: songStats } = useQuery({
@@ -522,39 +560,128 @@ export default function Catalog() {
             </SheetDescription>
           </SheetHeader>
 
-          <ScrollArea className="h-[calc(100vh-120px)] mt-6">
-            {loadingSongs ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          {loadingSongs ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+            </div>
+          ) : songs && songs.length > 0 ? (
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'list' | 'timeline')} className="mt-6">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="list" className="flex items-center gap-2">
+                  <List className="w-4 h-4" />
+                  Lista
+                </TabsTrigger>
+                <TabsTrigger value="timeline" className="flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Linha do Tempo
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Visualização Lista */}
+              <TabsContent value="list" className="mt-4">
+                <ScrollArea className="h-[calc(100vh-200px)]">
+                  <div className="space-y-3 pr-4">
+                    {songs.map((song) => (
+                      <SongCard
+                        key={song.id}
+                        title={song.title}
+                        composer={song.composer}
+                        releaseYear={song.release_year}
+                        lyrics={song.lyrics}
+                        status={song.status}
+                        enrichmentSource={song.enrichment_source}
+                        confidenceScore={song.confidence_score}
+                        youtubeUrl={song.youtube_url}
+                        isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
+                      />
+                    ))}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* Visualização Timeline */}
+              <TabsContent value="timeline" className="mt-4">
+                <ScrollArea className="h-[calc(100vh-200px)]">
+                  <div className="space-y-8 pr-4">
+                    {/* Anos conhecidos */}
+                    {songsByYear.years.map(({ year, songs: yearSongs }) => (
+                      <div key={year} className="space-y-3">
+                        {/* Cabeçalho do Ano - Sticky */}
+                        <div className="sticky top-0 bg-background z-10 py-2 border-b-2 border-primary">
+                          <h3 className="text-3xl font-bold text-primary flex items-center gap-2">
+                            <Clock className="w-6 h-6" />
+                            {year}
+                          </h3>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {yearSongs.length} {yearSongs.length === 1 ? 'música' : 'músicas'}
+                          </p>
+                        </div>
+                        
+                        {/* Músicas do Ano */}
+                        <div className="space-y-3 pl-2">
+                          {yearSongs.map((song) => (
+                            <SongCard
+                              key={song.id}
+                              title={song.title}
+                              composer={song.composer}
+                              releaseYear={song.release_year}
+                              lyrics={song.lyrics}
+                              status={song.status}
+                              enrichmentSource={song.enrichment_source}
+                              confidenceScore={song.confidence_score}
+                              youtubeUrl={song.youtube_url}
+                              isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Data Desconhecida */}
+                    {songsByYear.unknown.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="sticky top-0 bg-background z-10 py-2 border-b-2 border-muted">
+                          <h3 className="text-3xl font-bold text-muted-foreground flex items-center gap-2">
+                            <Clock className="w-6 h-6" />
+                            Data Desconhecida
+                          </h3>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {songsByYear.unknown.length} {songsByYear.unknown.length === 1 ? 'música' : 'músicas'}
+                          </p>
+                        </div>
+                        
+                        <div className="space-y-3 pl-2">
+                          {songsByYear.unknown.map((song) => (
+                            <SongCard
+                              key={song.id}
+                              title={song.title}
+                              composer={song.composer}
+                              releaseYear={song.release_year}
+                              lyrics={song.lyrics}
+                              status={song.status}
+                              enrichmentSource={song.enrichment_source}
+                              confidenceScore={song.confidence_score}
+                              youtubeUrl={song.youtube_url}
+                              isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <Music className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
+                <p className="text-muted-foreground">
+                  Nenhuma música encontrada
+                </p>
               </div>
-            ) : songs && songs.length > 0 ? (
-              <div className="space-y-3 pr-4">
-                {songs.map((song) => (
-                  <SongCard
-                    key={song.id}
-                    title={song.title}
-                    composer={song.composer}
-                    releaseYear={song.release_year}
-                    lyrics={song.lyrics}
-                    status={song.status}
-                    enrichmentSource={song.enrichment_source}
-                    confidenceScore={song.confidence_score}
-                    youtubeUrl={song.youtube_url}
-                    isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                  <Music className="w-12 h-12 mx-auto mb-3 text-muted-foreground" />
-                  <p className="text-muted-foreground">
-                    Nenhuma música encontrada
-                  </p>
-                </div>
-              </div>
-            )}
-          </ScrollArea>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
     </div>
