@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Music, Users, Loader2 } from 'lucide-react';
+import { Music, Users, Loader2, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { toast } from 'sonner';
 
 interface Artist {
   id: string;
@@ -37,6 +38,8 @@ const statusConfig = {
 
 export default function Catalog() {
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null);
+  const [isEnriching, setIsEnriching] = useState(false);
+  const queryClient = useQueryClient();
 
   // Query para artistas
   const { data: artists, isLoading: loadingArtists } = useQuery({
@@ -95,6 +98,89 @@ export default function Catalog() {
       setSelectedArtistId(artists[0].id);
     }
   }, [artists, selectedArtistId]);
+
+  // Supabase Realtime - Atualização em tempo real das músicas
+  useEffect(() => {
+    if (!selectedArtistId) return;
+
+    console.log('[Realtime] Setting up subscription for artist:', selectedArtistId);
+
+    const channel = supabase
+      .channel(`songs-${selectedArtistId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'songs',
+          filter: `artist_id=eq.${selectedArtistId}`
+        },
+        (payload) => {
+          console.log('[Realtime] Song updated:', payload.new);
+          
+          // Atualizar cache local imediatamente
+          queryClient.setQueryData(['songs', selectedArtistId], (oldData: Song[] | undefined) => {
+            if (!oldData) return oldData;
+            
+            return oldData.map(song => 
+              song.id === payload.new.id 
+                ? { ...song, ...payload.new }
+                : song
+            );
+          });
+          
+          toast.success(`Música "${payload.new.title}" atualizada!`);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log('[Realtime] Unsubscribing from channel');
+      supabase.removeChannel(channel);
+    };
+  }, [selectedArtistId, queryClient]);
+
+  // Função para enriquecer músicas pendentes do artista
+  const handleEnrichArtist = async () => {
+    if (!selectedArtistId) return;
+    
+    const pendingCount = songs?.filter(s => s.status === 'pending').length || 0;
+    
+    if (pendingCount === 0) {
+      toast.info('Não há músicas pendentes para enriquecer');
+      return;
+    }
+    
+    setIsEnriching(true);
+    toast.info(`Iniciando enriquecimento de ${pendingCount} músicas...`);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('enrich-music-data', {
+        body: {
+          mode: 'database',
+          artistId: selectedArtistId
+        }
+      });
+      
+      if (error) throw error;
+      
+      console.log('[Enrichment] Result:', data);
+      
+      toast.success(
+        `Enriquecimento concluído! ${data.success} sucessos, ${data.failed} falhas`,
+        { duration: 5000 }
+      );
+      
+      // Refetch para garantir dados atualizados
+      queryClient.invalidateQueries({ queryKey: ['songs', selectedArtistId] });
+      
+    } catch (error: any) {
+      console.error('[Enrichment] Error:', error);
+      toast.error(`Erro no enriquecimento: ${error.message}`);
+    } finally {
+      setIsEnriching(false);
+    }
+  };
 
   if (loadingArtists) {
     return (
@@ -182,8 +268,22 @@ export default function Catalog() {
                   <Button variant="outline" size="sm">
                     Exportar
                   </Button>
-                  <Button size="sm">
-                    Enriquecer Todas
+                  <Button 
+                    size="sm"
+                    onClick={handleEnrichArtist}
+                    disabled={isEnriching || !songs?.some(s => s.status === 'pending')}
+                  >
+                    {isEnriching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processando...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 mr-2" />
+                        Enriquecer Pendentes ({songs?.filter(s => s.status === 'pending').length || 0})
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>
