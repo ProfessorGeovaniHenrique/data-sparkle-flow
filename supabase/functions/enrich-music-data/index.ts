@@ -253,6 +253,9 @@ serve(async (req) => {
                 release_year: validatedData.ano_lancamento !== '0000' 
                   ? validatedData.ano_lancamento 
                   : null,
+                youtube_url: youtubeData?.videoId 
+                  ? `https://www.youtube.com/watch?v=${youtubeData.videoId}`
+                  : null,
                 status: 'enriched',
                 enrichment_source: enrichmentSource,
                 confidence_score: validatedData.status_pesquisa === 'Sucesso' ? 95 : 
