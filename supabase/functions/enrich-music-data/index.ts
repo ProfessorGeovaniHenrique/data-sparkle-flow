@@ -168,7 +168,7 @@ serve(async (req) => {
           // ============ BUSCAR NO YOUTUBE PRIMEIRO (RAG) ============
           let youtubeData: YouTubeSearchResult | null = null;
           try {
-            youtubeData = await searchYouTube(music.titulo, music.artista);
+            youtubeData = await searchYouTube(music.titulo, music.artista, supabaseClient);
           } catch (ytError) {
             console.error(`[YouTube] Erro ao buscar "${music.titulo}":`, ytError);
             // Continua sem YouTube
@@ -530,7 +530,8 @@ interface YouTubeSearchResult {
 
 async function searchYouTube(
   titulo: string, 
-  artista?: string
+  artista?: string,
+  supabaseClient?: any
 ): Promise<YouTubeSearchResult | null> {
   const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
   
@@ -544,7 +545,46 @@ async function searchYouTube(
   const artistaInfo = artista ? ` ${artista}` : '';
   const searchQuery = `${titulo}${artistaInfo} official audio`;
   
-  console.log(`🔎 [YouTube] Buscando: "${searchQuery}"`);
+  // ============ VERIFICAR CACHE PRIMEIRO ============
+  if (supabaseClient) {
+    try {
+      const { data: cachedData, error: cacheError } = await supabaseClient
+        .from('youtube_cache')
+        .select('*')
+        .eq('search_query', searchQuery)
+        .single();
+      
+      if (!cacheError && cachedData) {
+        console.log(`💾 [YouTube Cache] HIT: "${searchQuery}" (usado ${cachedData.hits_count} vezes)`);
+        
+        // Incrementar contador de hits e atualizar timestamp
+        await supabaseClient
+          .from('youtube_cache')
+          .update({ 
+            hits_count: cachedData.hits_count + 1,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', cachedData.id);
+        
+        // Retornar dados do cache
+        return {
+          videoTitle: cachedData.video_title,
+          channelTitle: cachedData.channel_title,
+          publishDate: cachedData.publish_date,
+          description: cachedData.description || '',
+          videoId: cachedData.video_id
+        };
+      }
+      
+      console.log(`🔍 [YouTube Cache] MISS: "${searchQuery}" - Buscando na API...`);
+    } catch (error) {
+      console.error('⚠️ [YouTube Cache] Erro ao verificar cache:', error);
+      // Continua com a busca na API
+    }
+  }
+  // ==================================================
+  
+  console.log(`🔎 [YouTube API] Buscando: "${searchQuery}"`);
 
   try {
     const url = new URL('https://www.googleapis.com/youtube/v3/search');
@@ -591,7 +631,33 @@ async function searchYouTube(
       videoId: firstResult.id.videoId
     };
 
-    console.log(`✅ [YouTube] Encontrado: "${result.videoTitle}" (${result.channelTitle})`);
+    console.log(`✅ [YouTube API] Encontrado: "${result.videoTitle}" (${result.channelTitle})`);
+    
+    // ============ SALVAR NO CACHE ============
+    if (supabaseClient) {
+      try {
+        await supabaseClient
+          .from('youtube_cache')
+          .insert({
+            search_query: searchQuery,
+            video_id: result.videoId,
+            video_title: result.videoTitle,
+            channel_title: result.channelTitle,
+            publish_date: result.publishDate,
+            description: result.description,
+            hits_count: 0
+          });
+        
+        console.log(`💾 [YouTube Cache] Resultado salvo no cache`);
+      } catch (cacheError: any) {
+        // Ignorar erro de duplicata (race condition)
+        if (!cacheError?.message?.includes('duplicate')) {
+          console.error('⚠️ [YouTube Cache] Erro ao salvar cache:', cacheError);
+        }
+      }
+    }
+    // =========================================
+    
     return result;
 
   } catch (error) {
