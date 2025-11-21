@@ -291,17 +291,40 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         let headerRowIndex = -1;
         const columnIndices: any = {};
 
+        // Fase 1: Varredura inteligente de cabeçalhos (primeiras 20 linhas)
         for (let i = 0; i < Math.min(jsonData.length, 20); i++) {
           const row = jsonData[i];
           row.forEach((cell: any, index: number) => {
             if (typeof cell !== 'string') return;
             const lowerCell = cell.toLowerCase().trim();
 
-            if (lowerCell.includes('música') || lowerCell.includes('titulo') || lowerCell === 'nome') columnIndices.musica = index;
-            else if (lowerCell.includes('artista') || lowerCell.includes('intérprete')) columnIndices.artista = index;
-            else if (lowerCell.includes('compositor') || lowerCell.includes('autor')) columnIndices.compositor = index;
-            else if (lowerCell.includes('ano') || lowerCell.includes('lançamento')) columnIndices.ano = index;
-            else if (lowerCell.includes('letra') || lowerCell.includes('lyric')) columnIndices.letra = index;
+            // Detecção expandida de coluna de música/título
+            if (lowerCell.includes('música') || lowerCell.includes('musica') || 
+                lowerCell.includes('titulo') || lowerCell.includes('título') ||
+                lowerCell === 'nome' || lowerCell.includes('faixa') || 
+                lowerCell.includes('track') || lowerCell.includes('song')) {
+              columnIndices.musica = index;
+            }
+            // Detecção expandida de coluna de artista
+            else if (lowerCell.includes('artista') || lowerCell.includes('intérprete') ||
+                     lowerCell.includes('interprete') || lowerCell.includes('cantor') ||
+                     lowerCell.includes('autor') || lowerCell.includes('banda') ||
+                     lowerCell.includes('artist')) {
+              columnIndices.artista = index;
+            }
+            // Compositor
+            else if (lowerCell.includes('compositor') || lowerCell.includes('composer')) {
+              columnIndices.compositor = index;
+            }
+            // Ano
+            else if (lowerCell.includes('ano') || lowerCell.includes('lançamento') || 
+                     lowerCell.includes('lancamento') || lowerCell.includes('year')) {
+              columnIndices.ano = index;
+            }
+            // Letra
+            else if (lowerCell.includes('letra') || lowerCell.includes('lyric')) {
+              columnIndices.letra = index;
+            }
           });
 
           if (columnIndices.musica !== undefined) {
@@ -310,17 +333,34 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           }
         }
 
+        // Fase 2: Fallback Posicional (CRÍTICO)
+        // Se não detectou cabeçalho, assume estrutura padrão: Coluna A = Artista, Coluna B = Música
         if (headerRowIndex === -1 || columnIndices.musica === undefined) {
-          // Não encontrou cabeçalho estruturado
-          // Não alterar headerRowIndex aqui - deixar como -1 para acionar formato alternado
-          columnIndices.musica = 0;
-          console.warn("Cabeçalho não detectado. Tentando formato alternado ou coluna A.");
+          console.warn('[Parser] Cabeçalhos não identificados. Aplicando fallback posicional padrão.');
+          
+          // Verifica se temos pelo menos 2 colunas com dados
+          const hasMultipleColumns = jsonData.length > 0 && jsonData[0].length >= 2;
+          
+          if (hasMultipleColumns) {
+            // Padrão brasileiro comum: Coluna A = Artista, Coluna B = Música
+            if (columnIndices.artista === undefined) columnIndices.artista = 0;
+            if (columnIndices.musica === undefined) columnIndices.musica = 1;
+            
+            console.log('[Parser] Fallback aplicado: Artista=Coluna A (0), Música=Coluna B (1)');
+            headerRowIndex = 0; // Assumir que primeira linha é dados, não cabeçalho
+          } else {
+            // Apenas uma coluna - formato alternado (título/artista em linhas consecutivas)
+            columnIndices.musica = 0;
+            console.log('[Parser] Detectado formato de coluna única (alternado)');
+          }
         }
 
         console.log('[Parser] Detecção de cabeçalho:', {
           headerRowIndex,
           columnIndices,
-          detectouMultiplasColunas: Object.keys(columnIndices).length > 1
+          detectouMultiplasColunas: Object.keys(columnIndices).length > 1,
+          musicaColuna: columnIndices.musica,
+          artistaColuna: columnIndices.artista
         });
 
         const extractedData: ParsedMusic[] = [];
