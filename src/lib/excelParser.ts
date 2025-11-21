@@ -1,5 +1,33 @@
 import * as XLSX from 'xlsx';
 
+/**
+ * Normaliza valor de célula para string ou null
+ * Trata todos os casos edge: objetos, números, booleanos, strings vazias, whitespace
+ */
+function normalizeCellValue(cellValue: any): string | null {
+  // Casos claramente vazios
+  if (cellValue === null || cellValue === undefined) {
+    return null;
+  }
+  
+  // Objetos (células mescladas podem retornar objetos)
+  if (typeof cellValue === 'object') {
+    const value = (cellValue as any)?.value;
+    if (value === null || value === undefined) return null;
+    cellValue = value;
+  }
+  
+  // Converter para string e normalizar
+  const str = String(cellValue).trim();
+  
+  // String vazia ou apenas whitespace
+  if (str === '' || str === 'undefined' || str === 'null') {
+    return null;
+  }
+  
+  return str;
+}
+
 // Função para parsing usando Web Worker (não trava a UI)
 export function parseExcelWithWorker(
   file: File, 
@@ -345,35 +373,44 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
 
           for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
             const row = jsonData[i];
-            const rawTitle = row[columnIndices.musica];
-
-            if (rawTitle && typeof rawTitle === 'string' && rawTitle.trim().length > 1) {
-              // Lógica de Fill Down para Artista
-              const rawArtista = columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined;
-              if (rawArtista && String(rawArtista).trim().length > 0) {
-                lastSeenArtista = String(rawArtista).trim();
-              }
-              // Se célula vazia, mantém lastSeenArtista (não atualiza)
-
-              // Lógica de Fill Down para Compositor
-              const rawCompositor = columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined;
-              if (rawCompositor && String(rawCompositor).trim().length > 0) {
-                lastSeenCompositor = String(rawCompositor).trim();
-              }
-
-              const rawLetra = columnIndices.letra !== undefined ? row[columnIndices.letra] : undefined;
-              const letra = rawLetra && String(rawLetra).trim().length > 0 ? String(rawLetra).trim() : undefined;
-
-              extractedData.push({
-                id: `${file.name}-${i}`,
-                titulo: cleanTitle(rawTitle),
-                artista: lastSeenArtista, // Usa o último artista visto
-                compositor: lastSeenCompositor, // Usa o último compositor visto
-                ano: columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined,
-                letra: letra,
-                fonte: file.name
-              });
+            
+            // 1. PRIMEIRO: Fill Down para Artista
+            const rawArtista = columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined;
+            const normalizedArtista = normalizeCellValue(rawArtista);
+            
+            if (normalizedArtista !== null) {
+              lastSeenArtista = normalizedArtista;
             }
+            
+            // 2. Fill Down para Compositor
+            const rawCompositor = columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined;
+            const normalizedCompositor = normalizeCellValue(rawCompositor);
+            
+            if (normalizedCompositor !== null) {
+              lastSeenCompositor = normalizedCompositor;
+            }
+            
+            // 3. Validar título
+            const rawTitle = row[columnIndices.musica];
+            const normalizedTitle = normalizeCellValue(rawTitle);
+            
+            if (!normalizedTitle || normalizedTitle.length < 2) {
+              continue;
+            }
+            
+            // 4. Adicionar item
+            const rawLetra = columnIndices.letra !== undefined ? row[columnIndices.letra] : undefined;
+            const normalizedLetra = normalizeCellValue(rawLetra);
+            
+            extractedData.push({
+              id: `${file.name}-${i}`,
+              titulo: cleanTitle(normalizedTitle),
+              artista: lastSeenArtista || 'Desconhecido',
+              compositor: lastSeenCompositor,
+              ano: columnIndices.ano !== undefined ? normalizeCellValue(row[columnIndices.ano]) || undefined : undefined,
+              letra: normalizedLetra || undefined,
+              fonte: file.name
+            });
           }
 
           // Log adicional para debugging
@@ -481,51 +518,47 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
 
         for (let i = startIndex; i < jsonData.length; i++) {
           const row = jsonData[i];
-          // Garante que a linha tem dados na coluna de título
-          const tituloRaw = row[map.tituloIndex];
-          if (tituloRaw && String(tituloRaw).trim().length > 1) {
-            // Lógica de Fill Down para Artista com sanitização
-            const rawArtista = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
-            let artistaValue: string | undefined = undefined;
-            
-            if (rawArtista !== null && rawArtista !== undefined) {
-              // Se for objeto, extrair propriedade 'value'
-              if (typeof rawArtista === 'object') {
-                artistaValue = (rawArtista as any).value !== undefined 
-                  ? String((rawArtista as any).value).trim() 
-                  : undefined;
-              } else {
-                artistaValue = String(rawArtista).trim();
-              }
-              
-              // Se resultou em string válida, atualizar lastSeenArtista
-              if (artistaValue && artistaValue.length > 0 && artistaValue !== 'undefined') {
-                lastSeenArtista = artistaValue;
-              }
-            }
-            // Se célula vazia, mantém lastSeenArtista
-
-            // Lógica de Fill Down para Compositor
-            const rawCompositor = map.compositorIndex >= 0 ? row[map.compositorIndex] : undefined;
-            if (rawCompositor && String(rawCompositor).trim().length > 0) {
-              lastSeenCompositor = String(rawCompositor).trim();
-            }
-
-            const rawLetra = map.letraIndex >= 0 ? row[map.letraIndex] : undefined;
-            const letra = rawLetra && String(rawLetra).trim().length > 0 ? String(rawLetra).trim() : undefined;
-
-            extractedData.push({
-              id: `${file.name}-${i}`,
-              titulo: cleanTitle(String(tituloRaw)),
-              artista: lastSeenArtista, // Usa o último artista visto
-              compositor: lastSeenCompositor, // Usa o último compositor visto
-              ano: map.anoIndex >= 0 && row[map.anoIndex]
-                ? String(row[map.anoIndex])
-                : undefined,
-              letra: letra,
-              fonte: file.name
-            });
+          
+          // 1. PRIMEIRO: Processar artista (Fill Down)
+          const rawArtista = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
+          const normalizedArtista = normalizeCellValue(rawArtista);
+          
+          if (normalizedArtista !== null) {
+            // Célula tem valor válido -> atualizar lastSeenArtista
+            lastSeenArtista = normalizedArtista;
           }
+          // Se normalizedArtista === null, mantém lastSeenArtista (Fill Down)
+          
+          // 2. Processar compositor (mesmo padrão)
+          const rawCompositor = map.compositorIndex >= 0 ? row[map.compositorIndex] : undefined;
+          const normalizedCompositor = normalizeCellValue(rawCompositor);
+          
+          if (normalizedCompositor !== null) {
+            lastSeenCompositor = normalizedCompositor;
+          }
+          
+          // 3. DEPOIS: Validar título e adicionar item
+          const tituloRaw = row[map.tituloIndex];
+          const normalizedTitulo = normalizeCellValue(tituloRaw);
+          
+          if (!normalizedTitulo || normalizedTitulo.length < 2) {
+            // Linha sem título válido -> pular
+            continue;
+          }
+          
+          // 4. Adicionar item com valores herdados
+          const rawLetra = map.letraIndex >= 0 ? row[map.letraIndex] : undefined;
+          const normalizedLetra = normalizeCellValue(rawLetra);
+          
+          extractedData.push({
+            id: `${file.name}-${i}`,
+            titulo: cleanTitle(normalizedTitulo),
+            artista: lastSeenArtista || 'Desconhecido', // Fallback se nunca viu artista
+            compositor: lastSeenCompositor,
+            ano: map.anoIndex >= 0 ? normalizeCellValue(row[map.anoIndex]) || undefined : undefined,
+            letra: normalizedLetra || undefined,
+            fonte: file.name
+          });
         }
 
         // Log adicional para debugging
