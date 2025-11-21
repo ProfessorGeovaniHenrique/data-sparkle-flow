@@ -365,56 +365,74 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           }
 
         } else {
-          // FORMATO TABULAR COM FILL DOWN
-          console.log('[Parser] Usando formato TABULAR com fill down');
+          // FORMATO TABULAR COM FILL DOWN - Implementação Robusta
+          console.log('[Parser] Iniciando extração robusta (formato tabular)...');
           console.log('[Parser] Colunas detectadas:', columnIndices);
-          let lastSeenArtista: string | undefined = undefined;
-          let lastSeenCompositor: string | undefined = undefined;
+          
+          // Estado persistente do último artista/compositor visto
+          let lastValidArtist: string = 'Desconhecido';
+          let lastValidComposer: string = '';
 
+          // Iterar linha a linha, sem filtros prévios
           for (let i = headerRowIndex + 1; i < jsonData.length; i++) {
             const row = jsonData[i];
             
-            // 1. PRIMEIRO: Fill Down para Artista
-            const rawArtista = columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined;
-            const normalizedArtista = normalizeCellValue(rawArtista);
-            
-            if (normalizedArtista !== null) {
-              lastSeenArtista = normalizedArtista;
-            }
-            
-            // 2. Fill Down para Compositor
-            const rawCompositor = columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined;
-            const normalizedCompositor = normalizeCellValue(rawCompositor);
-            
-            if (normalizedCompositor !== null) {
-              lastSeenCompositor = normalizedCompositor;
-            }
-            
-            // 3. Validar título
+            // Proteção contra linhas undefined
+            if (!row || row.length === 0) continue;
+
+            // 1. Extrair valores brutos
+            const rawArtist = columnIndices.artista !== undefined ? row[columnIndices.artista] : undefined;
             const rawTitle = row[columnIndices.musica];
-            const normalizedTitle = normalizeCellValue(rawTitle);
+            const rawComposer = columnIndices.compositor !== undefined ? row[columnIndices.compositor] : undefined;
+            const rawYear = columnIndices.ano !== undefined ? row[columnIndices.ano] : undefined;
+            const rawLyrics = columnIndices.letra !== undefined ? row[columnIndices.letra] : undefined;
+
+            // 2. Normalizar Título
+            const titleStr = String(rawTitle || '').trim();
             
-            if (!normalizedTitle || normalizedTitle.length < 2) {
+            // SE NÃO TEM TÍTULO, PULA. (Única condição de descarte)
+            if (!titleStr) {
               continue;
             }
-            
-            // 4. Adicionar item
-            const rawLetra = columnIndices.letra !== undefined ? row[columnIndices.letra] : undefined;
-            const normalizedLetra = normalizeCellValue(rawLetra);
-            
+
+            // 3. Lógica de Artista (Fill Down)
+            const artistStr = String(rawArtist || '').trim();
+            let effectiveArtist = '';
+
+            if (artistStr.length > 0) {
+              // Temos um artista novo nesta linha
+              effectiveArtist = artistStr;
+              lastValidArtist = artistStr; // Atualiza o estado
+            } else {
+              // Célula vazia -> Herda o anterior
+              effectiveArtist = lastValidArtist;
+              console.log(`[Parser] Linha ${i}: Herdando artista '${effectiveArtist}'`);
+            }
+
+            // 4. Lógica de Compositor (Fill Down)
+            const composerStr = String(rawComposer || '').trim();
+            let effectiveComposer = '';
+
+            if (composerStr.length > 0) {
+              effectiveComposer = composerStr;
+              lastValidComposer = composerStr;
+            } else {
+              effectiveComposer = lastValidComposer;
+            }
+
+            // 5. Adicionar ao resultado
             extractedData.push({
               id: `${file.name}-${i}`,
-              titulo: cleanTitle(normalizedTitle),
-              artista: lastSeenArtista || 'Desconhecido',
-              compositor: lastSeenCompositor,
-              ano: columnIndices.ano !== undefined ? normalizeCellValue(row[columnIndices.ano]) || undefined : undefined,
-              letra: normalizedLetra || undefined,
+              titulo: cleanTitle(titleStr),
+              artista: effectiveArtist,
+              compositor: effectiveComposer || undefined,
+              ano: String(rawYear || '').trim() || undefined,
+              letra: String(rawLyrics || '').trim() || undefined,
               fonte: file.name
             });
           }
 
-          // Log adicional para debugging
-          console.log('[Parser] Fill Down aplicado. Último artista:', lastSeenArtista);
+          console.log('[Parser] Fill Down aplicado. Último artista:', lastValidArtist);
         }
 
         // Log de debug: Dados extraídos (ANTES da consolidação)
@@ -510,59 +528,74 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
         const worksheet = workbook.Sheets[firstSheetName];
         const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
 
+        console.log('[Parser] Iniciando extração robusta (mapeamento manual)...');
         const extractedData: ParsedMusic[] = [];
         const startIndex = map.hasHeader ? 1 : 0;
 
-        let lastSeenArtista: string | undefined = undefined;
-        let lastSeenCompositor: string | undefined = undefined;
+        // Estado persistente do último artista/compositor visto
+        let lastValidArtist: string = 'Desconhecido';
+        let lastValidComposer: string = '';
 
+        // Iterar linha a linha, sem filtros prévios
         for (let i = startIndex; i < jsonData.length; i++) {
           const row = jsonData[i];
           
-          // 1. PRIMEIRO: Processar artista (Fill Down)
-          const rawArtista = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
-          const normalizedArtista = normalizeCellValue(rawArtista);
+          // Proteção contra linhas undefined
+          if (!row || row.length === 0) continue;
+
+          // 1. Extrair valores brutos
+          const rawArtist = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
+          const rawTitle = row[map.tituloIndex];
+          const rawComposer = map.compositorIndex >= 0 ? row[map.compositorIndex] : undefined;
+          const rawYear = map.anoIndex >= 0 ? row[map.anoIndex] : undefined;
+          const rawLyrics = map.letraIndex >= 0 ? row[map.letraIndex] : undefined;
+
+          // 2. Normalizar Título
+          const titleStr = String(rawTitle || '').trim();
           
-          if (normalizedArtista !== null) {
-            // Célula tem valor válido -> atualizar lastSeenArtista
-            lastSeenArtista = normalizedArtista;
-          }
-          // Se normalizedArtista === null, mantém lastSeenArtista (Fill Down)
-          
-          // 2. Processar compositor (mesmo padrão)
-          const rawCompositor = map.compositorIndex >= 0 ? row[map.compositorIndex] : undefined;
-          const normalizedCompositor = normalizeCellValue(rawCompositor);
-          
-          if (normalizedCompositor !== null) {
-            lastSeenCompositor = normalizedCompositor;
-          }
-          
-          // 3. DEPOIS: Validar título e adicionar item
-          const tituloRaw = row[map.tituloIndex];
-          const normalizedTitulo = normalizeCellValue(tituloRaw);
-          
-          if (!normalizedTitulo || normalizedTitulo.length < 2) {
-            // Linha sem título válido -> pular
+          // SE NÃO TEM TÍTULO, PULA. (Única condição de descarte)
+          if (!titleStr) {
             continue;
           }
-          
-          // 4. Adicionar item com valores herdados
-          const rawLetra = map.letraIndex >= 0 ? row[map.letraIndex] : undefined;
-          const normalizedLetra = normalizeCellValue(rawLetra);
-          
+
+          // 3. Lógica de Artista (Fill Down)
+          const artistStr = String(rawArtist || '').trim();
+          let effectiveArtist = '';
+
+          if (artistStr.length > 0) {
+            // Temos um artista novo nesta linha
+            effectiveArtist = artistStr;
+            lastValidArtist = artistStr; // Atualiza o estado
+          } else {
+            // Célula vazia -> Herda o anterior
+            effectiveArtist = lastValidArtist;
+            console.log(`[Parser] Linha ${i}: Herdando artista '${effectiveArtist}'`);
+          }
+
+          // 4. Lógica de Compositor (Fill Down)
+          const composerStr = String(rawComposer || '').trim();
+          let effectiveComposer = '';
+
+          if (composerStr.length > 0) {
+            effectiveComposer = composerStr;
+            lastValidComposer = composerStr;
+          } else {
+            effectiveComposer = lastValidComposer;
+          }
+
+          // 5. Adicionar ao resultado
           extractedData.push({
             id: `${file.name}-${i}`,
-            titulo: cleanTitle(normalizedTitulo),
-            artista: lastSeenArtista || 'Desconhecido', // Fallback se nunca viu artista
-            compositor: lastSeenCompositor,
-            ano: map.anoIndex >= 0 ? normalizeCellValue(row[map.anoIndex]) || undefined : undefined,
-            letra: normalizedLetra || undefined,
+            titulo: cleanTitle(titleStr),
+            artista: effectiveArtist,
+            compositor: effectiveComposer || undefined,
+            ano: String(rawYear || '').trim() || undefined,
+            letra: String(rawLyrics || '').trim() || undefined,
             fonte: file.name
           });
         }
 
-        // Log adicional para debugging
-        console.log('[Parser] Fill Down (manual map) aplicado. Artista final:', lastSeenArtista);
+        console.log('[Parser] Fill Down (manual map) aplicado. Último artista:', lastValidArtist);
 
         // Log de debug: Dados extraídos após mapeamento (ANTES da consolidação)
         console.log('[Parser] Dados extraídos após mapeamento:', extractedData.length, 'músicas');
