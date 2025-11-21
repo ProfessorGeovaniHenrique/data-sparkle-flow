@@ -1,5 +1,6 @@
 import { ParsedMusic } from './excelParser';
 import { ProcessingContextType } from '../contexts/ProcessingContext';
+import pLimit from 'p-limit';
 
 export interface EnrichedMusicData {
   id?: string;
@@ -25,11 +26,13 @@ export class BatchProcessor {
   private isRunning: boolean = false;
   private readonly MAX_RETRIES = 3;
   private readonly INITIAL_RETRY_DELAY_MS = 2000;
-  private readonly CONCURRENCY = 3;
+  private readonly CONCURRENCY = 2; // Reduzido de 3 para 2
+  private readonly MAX_REQUESTS_PER_SECOND = 5; // Novo limite global
+  private rateLimiter = pLimit(this.MAX_REQUESTS_PER_SECOND); // Rate limiter
 
   constructor(
     items: ParsedMusic[],
-    batchSize: number = 50,
+    batchSize: number = 10, // Reduzido de 50 para 10
     processBatch: ProcessBatchFn,
     context: ProcessingContextType
   ) {
@@ -137,7 +140,9 @@ export class BatchProcessor {
           
           this.currentIndex += batch.length;
           
-          const batchPromise = this.processWithRetry(batch, batchNumber)
+          const batchPromise = this.rateLimiter(() => 
+            this.processWithRetry(batch, batchNumber)
+          )
             .then(batchResults => {
               console.log('[BatchProcessor] Batch', batchNumber, 'concluído - Resultados:', batchResults.length);
               

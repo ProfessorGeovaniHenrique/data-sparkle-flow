@@ -112,7 +112,7 @@ serve(async (req) => {
       
       // Add delay between requests to avoid rate limiting
       if (i < musicsToProcess.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        await new Promise(resolve => setTimeout(resolve, 800)); // Reduzido de 1500ms para 800ms
       }
     }
 

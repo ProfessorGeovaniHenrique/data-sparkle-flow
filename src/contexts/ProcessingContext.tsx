@@ -1,10 +1,9 @@
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { EnrichedMusicData } from '@/lib/batchProcessor';
+import { storageService, StorageMetadata } from '@/lib/storage';
 
 export type ProcessingStatus = 'idle' | 'extracting' | 'processing' | 'enriching' | 'paused' | 'cancelled' | 'completed';
-
-const STORAGE_KEY = 'MUSIC_ENRICHER_STATE_V1';
 
 export interface ProcessingError {
   timestamp: string;
@@ -76,53 +75,66 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
   const canPause = status === 'extracting' || status === 'enriching';
   const canCancel = status !== 'idle' && status !== 'completed' && status !== 'cancelled';
 
-  // Carregar estado salvo do localStorage na montagem
+  // Carregar estado salvo na montagem
   useEffect(() => {
-    try {
-      const savedState = localStorage.getItem(STORAGE_KEY);
-      if (savedState) {
-        const parsed = JSON.parse(savedState);
+    const loadState = async () => {
+      try {
+        // Limpar storage legado (localStorage com results grandes)
+        storageService.clearLegacyStorage();
         
-        // Restaurar estado salvo
-        setStatus(parsed.status === 'running' ? 'paused' : parsed.status || 'idle');
-        setProgressState(parsed.progress || initialProgress);
-        setErrors(parsed.errors || []);
-        setResults(parsed.results || []);
-        setSelectedTitles(parsed.selectedTitles || []);
-        
-        if (parsed.results && parsed.results.length > 0) {
-          toast.info(`Progresso anterior restaurado: ${parsed.results.length} músicas processadas.`);
+        // Carregar metadados leves do localStorage
+        const metadata = storageService.loadMetadata();
+        if (metadata) {
+          setStatus(metadata.status === 'running' ? 'paused' : (metadata.status as ProcessingStatus) || 'idle');
+          setProgressState(metadata.progress || initialProgress);
         }
+        
+        // Carregar resultados pesados do IndexedDB (assíncrono)
+        const savedResults = await storageService.loadResults();
+        if (savedResults.length > 0) {
+          setResults(savedResults);
+          toast.info(`Progresso anterior restaurado: ${savedResults.length} músicas processadas.`);
+        }
+      } catch (error) {
+        console.error('[ProcessingContext] Erro ao carregar estado salvo:', error);
+      } finally {
+        setIsInitialized(true);
       }
-    } catch (error) {
-      console.error('Erro ao carregar estado salvo:', error);
-    } finally {
-      setIsInitialized(true);
-    }
+    };
+    
+    loadState();
   }, []);
 
   // Salvar estado automaticamente (com debounce)
   useEffect(() => {
     if (!isInitialized) return;
 
-    const timeoutId = setTimeout(() => {
+    const timeoutId = setTimeout(async () => {
       try {
-        const stateToSave = {
+        // Salvar metadados leves no localStorage (síncrono, rápido)
+        const metadata: StorageMetadata = {
           status,
           progress,
-          errors,
-          results,
-          selectedTitles,
           timestamp: Date.now()
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+        storageService.saveMetadata(metadata);
+        
+        // Salvar resultados pesados no IndexedDB (assíncrono, não trava UI)
+        if (results.length > 0) {
+          await storageService.saveResults(results);
+        }
       } catch (error) {
-        console.error('Erro ao salvar estado:', error);
+        console.error('[ProcessingContext] Erro ao salvar estado:', error);
+        // Se falhar por falta de espaço, tentar limpar storage antigo
+        if (error instanceof Error && error.name === 'QuotaExceededError') {
+          console.warn('[ProcessingContext] Quota excedida. Limpando storage legado...');
+          storageService.clearLegacyStorage();
+        }
       }
     }, 2000); // Debounce de 2 segundos
 
     return () => clearTimeout(timeoutId);
-  }, [status, progress, errors, results, selectedTitles, isInitialized]);
+  }, [status, progress, results, isInitialized]);
 
   const setProgress = useCallback((newProgress: Partial<ProcessingProgress>) => {
     setProgressState(prev => {
@@ -175,13 +187,13 @@ export const ProcessingProvider = ({ children }: { children: ReactNode }) => {
     console.log('[ProcessingContext] Status resetado para idle');
   }, []);
 
-  const clearSavedState = useCallback(() => {
+  const clearSavedState = useCallback(async () => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      await storageService.clearAll();
       reset();
       toast.info('Estado limpo. Pronto para novo processamento.');
     } catch (error) {
-      console.error('Erro ao limpar estado salvo:', error);
+      console.error('[ProcessingContext] Erro ao limpar estado salvo:', error);
     }
   }, [reset]);
 
