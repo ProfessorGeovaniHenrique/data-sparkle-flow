@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Music, Users, Loader2, Search, Upload, Trash2, List, Clock } from 'lucide-react';
+import { Music, Users, Loader2, Search, Upload, Trash2, List, Clock, BookOpen, Sparkles, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -18,6 +18,8 @@ interface Artist {
   id: string;
   name: string;
   genre: string | null;
+  biography: string | null;
+  biography_source: string | null;
   created_at: string;
 }
 
@@ -51,6 +53,7 @@ export default function Catalog() {
   const [recentlyEnrichedIds, setRecentlyEnrichedIds] = useState<Set<string>>(new Set());
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list');
+  const [isEnrichingBio, setIsEnrichingBio] = useState(false);
   const queryClient = useQueryClient();
 
   // Query para artistas
@@ -389,6 +392,34 @@ export default function Catalog() {
     setIsSheetOpen(true);
   };
 
+  const handleEnrichBiography = async () => {
+    if (!selectedArtistId || !selectedArtist) return;
+    
+    setIsEnrichingBio(true);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('enrich-artist-profile', {
+        body: {
+          artistId: selectedArtistId,
+          artistName: selectedArtist.name
+        }
+      });
+
+      if (error) throw error;
+
+      toast.success(`Biografia de "${selectedArtist.name}" enriquecida com sucesso!`);
+      
+      // Invalidar query para recarregar dados do artista
+      queryClient.invalidateQueries({ queryKey: ['artists'] });
+      
+    } catch (error) {
+      console.error('Erro ao enriquecer biografia:', error);
+      toast.error('Erro ao enriquecer biografia. Tente novamente.');
+    } finally {
+      setIsEnrichingBio(false);
+    }
+  };
+
   if (loadingArtists) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -559,6 +590,65 @@ export default function Catalog() {
               {songs?.length || 0} músicas no catálogo
             </SheetDescription>
           </SheetHeader>
+
+          {/* Biografia do Artista */}
+          {selectedArtist && (
+            <div className="mt-6 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <BookOpen className="w-5 h-5" />
+                  Biografia
+                </h3>
+                {!selectedArtist.biography && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleEnrichBiography}
+                    disabled={isEnrichingBio}
+                    className="flex items-center gap-2"
+                  >
+                    {isEnrichingBio ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Buscando...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Buscar Biografia
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+              
+              {selectedArtist.biography ? (
+                <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                  <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                    {selectedArtist.biography}
+                  </p>
+                  
+                  {selectedArtist.biography_source === 'wikipedia' && (
+                    <div className="flex items-center gap-2 pt-2 border-t border-border/50">
+                      <ExternalLink className="w-4 h-4 text-muted-foreground" />
+                      <a 
+                        href={`https://pt.wikipedia.org/wiki/${encodeURIComponent(selectedArtist.name)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Ler artigo completo na Wikipédia
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  Biografia ainda não disponível. Clique no botão acima para buscar.
+                </p>
+              )}
+            </div>
+          )}
 
           {loadingSongs ? (
             <div className="flex items-center justify-center py-12">

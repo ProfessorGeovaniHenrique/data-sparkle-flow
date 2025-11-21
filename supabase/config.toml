@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.enrich-music-data]
 verify_jwt = false
+
+[functions.enrich-artist-profile]
+verify_jwt = false
