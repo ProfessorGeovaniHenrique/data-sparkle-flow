@@ -140,9 +140,9 @@ export class BatchProcessor {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         
-        // Para se cancelado (status volta para idle)
-        if (this.context.status === 'idle') {
-          console.log('[BatchProcessor] Status IDLE detectado - parando');
+        // Para se cancelado OU idle
+        if (this.context.status === 'idle' || this.context.status === 'cancelled') {
+          console.log('[BatchProcessor] Status de parada detectado:', this.context.status, '- parando');
           break;
         }
 

@@ -120,11 +120,19 @@ function consolidateDuplicates(musics: ParsedMusic[]): ParsedMusic[] {
   const musicMap = new Map<string, ParsedMusic>();
   
   musics.forEach(music => {
-    const key = `${music.titulo.toLowerCase().trim()}|||${(music.artista || '').toLowerCase().trim()}`;
+    // Sanitizar artista para garantir que é string
+    const artistaStr = typeof music.artista === 'object' 
+      ? String((music.artista as any)?.value || '') 
+      : (music.artista || '');
+    
+    const key = `${music.titulo.toLowerCase().trim()}|||${artistaStr.toLowerCase().trim()}`;
     
     if (!musicMap.has(key)) {
-      // Primeira ocorrência: adiciona ao Map
-      musicMap.set(key, { ...music });
+      // Primeira ocorrência: adiciona ao Map (garantindo artista como string)
+      musicMap.set(key, { 
+        ...music,
+        artista: artistaStr || undefined
+      });
     } else {
       // Duplicata encontrada: consolidar campos
       const existing = musicMap.get(key)!;
@@ -132,7 +140,7 @@ function consolidateDuplicates(musics: ParsedMusic[]): ParsedMusic[] {
       // Regra: prioriza o valor mais longo/completo
       existing.compositor = chooseLonger(existing.compositor, music.compositor);
       existing.ano = chooseLonger(existing.ano, music.ano);
-      existing.artista = chooseLonger(existing.artista, music.artista);
+      existing.artista = chooseLonger(existing.artista, artistaStr);
       // Mantém o titulo, fonte e id originais
     }
   });
@@ -465,10 +473,24 @@ export async function extractDataFromMap(file: File, map: ColumnMap): Promise<Pa
           // Garante que a linha tem dados na coluna de título
           const tituloRaw = row[map.tituloIndex];
           if (tituloRaw && String(tituloRaw).trim().length > 1) {
-            // Lógica de Fill Down para Artista
+            // Lógica de Fill Down para Artista com sanitização
             const rawArtista = map.artistaIndex >= 0 ? row[map.artistaIndex] : undefined;
-            if (rawArtista && String(rawArtista).trim().length > 0) {
-              lastSeenArtista = String(rawArtista).trim();
+            let artistaValue: string | undefined = undefined;
+            
+            if (rawArtista !== null && rawArtista !== undefined) {
+              // Se for objeto, extrair propriedade 'value'
+              if (typeof rawArtista === 'object') {
+                artistaValue = (rawArtista as any).value !== undefined 
+                  ? String((rawArtista as any).value).trim() 
+                  : undefined;
+              } else {
+                artistaValue = String(rawArtista).trim();
+              }
+              
+              // Se resultou em string válida, atualizar lastSeenArtista
+              if (artistaValue && artistaValue.length > 0 && artistaValue !== 'undefined') {
+                lastSeenArtista = artistaValue;
+              }
             }
             // Se célula vazia, mantém lastSeenArtista
 

@@ -68,6 +68,9 @@ const IndexContent = () => {
     console.log('[Index] Primeiras 3 músicas:', musicsToProcess.slice(0, 3));
     
     processingContext.reset();
+    
+    // Aguardar propagação do estado após reset
+    await new Promise(resolve => setTimeout(resolve, 50));
 
     const processBatchFn = async (batch: ParsedMusic[]): Promise<EnrichedMusicData[]> => {
       console.log('[Index] processBatchFn chamado com', batch.length, 'items');
