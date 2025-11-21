@@ -155,36 +155,47 @@ function chooseLonger(a?: string, b?: string): string | undefined {
 
 // Consolida músicas duplicadas (mesmo título + artista)
 function consolidateDuplicates(musics: ParsedMusic[]): ParsedMusic[] {
-  // Cria um Map usando chave composta (titulo + artista, case-insensitive)
-  const musicMap = new Map<string, ParsedMusic>();
+  console.log(`[Consolidação] Iniciando com ${musics.length} itens...`);
   
-  musics.forEach(music => {
-    // Sanitizar artista para garantir que é string
-    const artistaStr = typeof music.artista === 'object' 
-      ? String((music.artista as any)?.value || '') 
-      : (music.artista || '');
+  const uniqueMap = new Map<string, ParsedMusic>();
+
+  musics.forEach((music, index) => {
+    // Normalizar título e artista para comparação
+    const normalizedTitle = (music.titulo || '').toLowerCase().trim();
+    const normalizedArtist = (music.artista || '').toLowerCase().trim();
     
-    const key = `${music.titulo.toLowerCase().trim()}|||${artistaStr.toLowerCase().trim()}`;
+    // Log para debug
+    if (index < 5) {
+      console.log(`[Consolidação] Item ${index}: "${normalizedTitle}" - "${normalizedArtist}"`);
+    }
     
-    if (!musicMap.has(key)) {
-      // Primeira ocorrência: adiciona ao Map (garantindo artista como string)
-      musicMap.set(key, { 
-        ...music,
-        artista: artistaStr || undefined
-      });
-    } else {
-      // Duplicata encontrada: consolidar campos
-      const existing = musicMap.get(key)!;
+    // Chave composta OBRIGATÓRIA: TÍTULO + ARTISTA
+    // Se o título for diferente, a chave SERÁ diferente, impedindo a fusão indevida
+    const key = `${normalizedTitle}|||${normalizedArtist}`;
+
+    if (uniqueMap.has(key)) {
+      // Duplicata encontrada: merge seguro
+      const existing = uniqueMap.get(key)!;
+      console.log(`[Consolidação] Duplicata encontrada: "${music.titulo}" - "${music.artista}"`);
       
-      // Regra: prioriza o valor mais longo/completo
-      existing.compositor = chooseLonger(existing.compositor, music.compositor);
-      existing.ano = chooseLonger(existing.ano, music.ano);
-      existing.artista = chooseLonger(existing.artista, artistaStr);
-      // Mantém o titulo, fonte e id originais
+      // Preservar o que tiver mais dados (letra, compositor, etc)
+      const merged: ParsedMusic = {
+        ...existing,
+        compositor: existing.compositor || music.compositor,
+        ano: existing.ano || music.ano,
+        letra: existing.letra || music.letra,
+      };
+      
+      uniqueMap.set(key, merged);
+    } else {
+      // Primeira ocorrência
+      uniqueMap.set(key, music);
     }
   });
-  
-  return Array.from(musicMap.values());
+
+  const result = Array.from(uniqueMap.values());
+  console.log(`[Consolidação] Finalizado. Resultado: ${result.length} músicas únicas.`);
+  return result;
 }
 
 /**
