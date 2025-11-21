@@ -12,6 +12,7 @@ export interface ColumnMap {
   artistaIndex: number;
   compositorIndex: number;
   anoIndex: number;
+  letraIndex: number;
   hasHeader: boolean;
 }
 
@@ -28,6 +29,7 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
   const [artistaCol, setArtistaCol] = useState<string>("-1");
   const [compositorCol, setCompositorCol] = useState<string>("-1");
   const [anoCol, setAnoCol] = useState<string>("-1");
+  const [letraCol, setLetraCol] = useState<string>("-1");
 
   // Gera letras de colunas (A, B, C...) baseadas no número de colunas da primeira linha
   const numCols = rawRows.length > 0 ? rawRows[0].length : 0;
@@ -59,6 +61,10 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
         setAnoCol(String(idx));
         setHasHeader(true);
       }
+      if (cell.includes('letra') || cell.includes('lyric')) {
+        setLetraCol(String(idx));
+        setHasHeader(true);
+      }
     });
   }, [rawRows]);
 
@@ -68,6 +74,7 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
       artistaIndex: parseInt(artistaCol),
       compositorIndex: parseInt(compositorCol),
       anoIndex: parseInt(anoCol),
+      letraIndex: parseInt(letraCol),
       hasHeader
     });
   };
@@ -93,7 +100,7 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
       
       <CardContent className="p-6 space-y-8">
         {/* Controles de Mapeamento */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
           <div className="space-y-2">
             <Label className="text-primary font-semibold">Título da Música <span className="text-destructive">*</span></Label>
             <Select value={tituloCol} onValueChange={setTituloCol}>
@@ -106,7 +113,7 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Onde está o nome da música?</p>
+            <p className="text-xs text-muted-foreground">Nome curto da música</p>
           </div>
 
           <div className="space-y-2">
@@ -152,6 +159,22 @@ const ColumnMapper: React.FC<ColumnMapperProps> = ({ filename, rawRows, onConfir
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Letra Completa</Label>
+            <Select value={letraCol} onValueChange={setLetraCol}>
+              <SelectTrigger className="bg-background">
+                <SelectValue placeholder="(Opcional)" />
+              </SelectTrigger>
+              <SelectContent className="bg-background">
+                <SelectItem value="-1">Não existe no arquivo</SelectItem>
+                {columns.map(col => (
+                  <SelectItem key={col.index} value={String(col.index)}>{col.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Letra da música (se houver)</p>
           </div>
         </div>
 
