@@ -12,6 +12,8 @@ import { EnrichedMusicData } from '@/lib/batchProcessor';
 import { useProcessing } from '@/contexts/ProcessingContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { DraggableQueueTable } from './DraggableQueueTable';
+import { AdvancedExportMenu } from './AdvancedExportMenu';
 
 interface WorkflowTabsProps {
   queuedItems: { id: string; titulo: string; artista: string; fonte: string }[];
@@ -48,7 +50,7 @@ export const WorkflowTabs = ({ queuedItems, pendingItems, approvedItems, isProce
       </TabsList>
 
       <TabsContent value="queue">
-        <QueueTable items={queuedItems} />
+        <DraggableQueueTable items={queuedItems} />
       </TabsContent>
 
       <TabsContent value="inbox">
@@ -496,8 +498,15 @@ const ApprovedTable = ({ items }: { items: EnrichedMusicData[] }) => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-2xl">Músicas Aprovadas</CardTitle>
-        <CardDescription>{items.length} músicas prontas para exportação</CardDescription>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <CardTitle className="text-2xl">Músicas Aprovadas</CardTitle>
+            <CardDescription className="mt-1">
+              {items.length} músicas prontas para exportação
+            </CardDescription>
+          </div>
+          <AdvancedExportMenu data={items} />
+        </div>
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
