@@ -1,10 +1,25 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Sparkles, Youtube } from 'lucide-react';
+import { ChevronDown, ChevronUp, Sparkles, Youtube, Play } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+// Função para extrair o Video ID da URL do YouTube
+const extractYoutubeVideoId = (url: string): string | null => {
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
+    /youtube\.com\/embed\/([^&\n?#]+)/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  
+  return null;
+};
 
 interface SongCardProps {
   title: string;
@@ -38,8 +53,10 @@ export function SongCard({
   isRecentlyEnriched = false
 }: SongCardProps) {
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
   const statusInfo = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
   const isEnriched = status === 'enriched' || status === 'approved';
+  const videoId = youtubeUrl ? extractYoutubeVideoId(youtubeUrl) : null;
 
   return (
     <Card 
@@ -57,15 +74,29 @@ export function SongCard({
                 {title || 'Título não identificado'}
               </h3>
               {youtubeUrl && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                  onClick={() => window.open(youtubeUrl, '_blank')}
-                  title="Ouvir no YouTube"
-                >
-                  <Youtube className="w-5 h-5" />
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30",
+                      showVideo && "bg-red-50 dark:bg-red-950/30"
+                    )}
+                    onClick={() => setShowVideo(!showVideo)}
+                    title={showVideo ? "Ocultar player" : "Assistir no card"}
+                  >
+                    <Play className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                    onClick={() => window.open(youtubeUrl, '_blank')}
+                    title="Abrir no YouTube"
+                  >
+                    <Youtube className="w-5 h-5" />
+                  </Button>
+                </div>
               )}
             </div>
             <div className="flex gap-2 shrink-0">
@@ -136,6 +167,21 @@ export function SongCard({
             </p>
           </div>
         </div>
+
+        {/* Player do YouTube (Embed) */}
+        {showVideo && videoId && (
+          <div className="w-full aspect-video rounded-lg overflow-hidden bg-black border border-border">
+            <iframe
+              width="100%"
+              height="100%"
+              src={`https://www.youtube.com/embed/${videoId}`}
+              title="YouTube video player"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        )}
 
         {/* Metadados Secundários */}
         {(enrichmentSource || confidenceScore > 0) && (
