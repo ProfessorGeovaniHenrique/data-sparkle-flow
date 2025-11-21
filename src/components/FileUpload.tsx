@@ -2,10 +2,11 @@ import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from "sonner";
-import { parseExcelFile, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult, cleanScraperData } from '@/lib/excelParser';
+import { parseExcelWithWorker, ParseResult, parseExcelRaw, extractDataFromMap, RawParseResult, cleanScraperData } from '@/lib/excelParser';
 import { deduplicateMusicData } from '@/lib/deduplication';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
 import ColumnMapper, { ColumnMap } from '@/components/ColumnMapper';
 import { ProcessingLog } from '@/components/ProcessingLog';
 
@@ -21,7 +22,7 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
   const [needsMapping, setNeedsMapping] = useState(false);
   const [rawParseData, setRawParseData] = useState<RawParseResult | null>(null);
   
-  // Novos estados para deduplicação
+  // Estados para deduplicação
   const [showDeduplicationPreview, setShowDeduplicationPreview] = useState(false);
   const [preDedupeData, setPreDedupeData] = useState<ParseResult[] | null>(null);
   const [deduplicationStats, setDeduplicationStats] = useState<{
@@ -30,14 +31,16 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     uniqueCount: number;
   } | null>(null);
   
-  // Estado para logs de processamento
+  // Estado para logs e progresso do worker
   const [processingLogs, setProcessingLogs] = useState<string[]>([]);
+  const [parsingProgress, setParsingProgress] = useState<number>(0);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
     setIsParsing(true);
     setRawFiles(acceptedFiles);
+    setParsingProgress(0);
     clearLogs();
     addLog(`📁 ${acceptedFiles.length} arquivo(s) selecionado(s).`);
     const results: ParseResult[] = [];
@@ -46,38 +49,60 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     try {
       for (const file of acceptedFiles) {
         try {
+          addLog(`📖 Lendo arquivo: ${file.name}...`);
           toast.info(`Lendo arquivo: ${file.name}...`);
-          const result = await parseExcelFile(file);
+          
+          // Usar Web Worker para parsing assíncrono
+          const rawData = await parseExcelWithWorker(file, (message, percentage) => {
+            setParsingProgress(percentage);
+            addLog(`  ${message} (${percentage}%)`);
+          });
+          
+          addLog(`✓ Arquivo lido: ${rawData.totalRows} linhas detectadas`);
           
           // Verifica confiança da detecção
-          if (result.detectionConfidence === 'low') {
+          if (rawData.detectionConfidence === 'low') {
             // Baixa confiança: pede mapeamento manual
             toast.warning("Não foi possível identificar as colunas automaticamente. Por favor, mapeie-as manualmente.");
-            const rawData = await parseExcelRaw(file);
+            addLog('⚠️ Detecção de colunas com baixa confiança. Mapeamento manual necessário.');
             setRawParseData(rawData);
             setNeedsMapping(true);
             setIsParsing(false);
+            setParsingProgress(0);
             return; // Para aqui e mostra o mapper
           } else {
-            // Alta confiança: prossegue normalmente
+            // Alta confiança: extrai dados automaticamente
+            addLog('✓ Colunas detectadas automaticamente com alta confiança');
+            const result = await extractDataFromMap(file, {
+              tituloIndex: 0, // Será ajustado pela extração automática
+              artistaIndex: -1,
+              compositorIndex: -1,
+              anoIndex: -1,
+              letraIndex: -1,
+              hasHeader: true
+            });
             
             // Validação: se nenhum dado foi extraído
             if (result.extractedData.length === 0) {
               toast.error(`${file.name}: Nenhuma música foi extraída. Verifique o formato do arquivo.`);
+              addLog(`❌ ${file.name}: Nenhuma música extraída`);
               hasError = true;
             } else {
               results.push(result);
+              addLog(`✓ ${file.name}: ${result.totalRows} músicas extraídas`);
               toast.success(`${file.name}: ${result.totalRows} músicas encontradas.`);
             }
           }
         } catch (error: any) {
           console.error(`Erro ao ler ${file.name}:`, error);
+          addLog(`❌ Erro ao processar ${file.name}: ${error.message}`);
           toast.error(`Falha ao ler ${file.name}: ${error.message}`);
           hasError = true;
         }
       }
     } finally {
       setIsParsing(false);
+      setParsingProgress(0);
       if (!hasError && results.length > 0) {
         // Em vez de setar parseResults diretamente, faz deduplicação primeiro
         checkForDuplicates(results);
@@ -410,13 +435,21 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
           </div>
           <div>
             <h3 className="text-lg font-semibold mb-1">
-              {isParsing ? "Lendo arquivos..." : "Arraste suas planilhas aqui"}
+              {isParsing ? "Processando arquivo..." : "Arraste suas planilhas aqui"}
             </h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
               {isParsing
-                ? "Processando dados no seu navegador, aguarde..."
+                ? "Parsing sendo feito em thread separada. A UI permanece responsiva!"
                 : "Ou clique para selecionar arquivos .xlsx ou .xls. O processamento inicial é feito no seu computador."}
             </p>
+            {isParsing && parsingProgress > 0 && (
+              <div className="mt-4 w-full max-w-xs mx-auto">
+                <Progress value={parsingProgress} className="h-2" />
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  {parsingProgress.toFixed(0)}% concluído
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
