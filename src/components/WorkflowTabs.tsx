@@ -170,6 +170,11 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
     }, 1000);
   };
 
+  // Reset selectedRowIndex ao mudar página ou filtro
+  useEffect(() => {
+    setSelectedRowIndex(0);
+  }, [currentPage, searchTerm]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingCell) return;
@@ -203,7 +208,7 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingCell, paginatedItems, selectedRowIndex, approveItem]);
+  }, [editingCell, paginatedItems, selectedRowIndex, approveItem, showApprovalFeedback]);
 
   useEffect(() => {
     if (isKeyboardMode && tableContainerRef.current) {

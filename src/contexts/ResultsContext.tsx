@@ -42,7 +42,7 @@ export const ResultsProvider = ({ children }: { children: ReactNode }) => {
     loadResults();
   }, []);
 
-  // Salvar resultados no IndexedDB com debounce
+  // Salvar resultados no IndexedDB com debounce reduzido
   useEffect(() => {
     if (!isInitialized) return;
 
@@ -57,14 +57,36 @@ export const ResultsProvider = ({ children }: { children: ReactNode }) => {
         if (error instanceof Error && error.name === 'QuotaExceededError') {
           console.warn('[Results] Quota excedida. Limpando storage legado...');
           storageService.clearLegacyStorage();
+          toast.error('Espaço de armazenamento excedido. Alguns dados foram limpos.');
         }
       }
-    }, 2000); // Debounce de 2 segundos
+    }, 500); // Debounce reduzido de 2000ms para 500ms
 
     return () => clearTimeout(timeoutId);
   }, [results, isInitialized]);
 
+  // Salvar dados antes de fechar a aba/janela
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      if (results.length > 0) {
+        try {
+          await storageService.saveResults(results);
+          console.log('[Results] Dados salvos antes de sair');
+        } catch (error) {
+          console.error('[Results] Erro ao salvar antes de sair:', error);
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [results]);
+
   const updateResultItem = useCallback((id: string, changes: Partial<EnrichedMusicData>) => {
+    if (!id) {
+      console.error('[Results] Tentativa de atualizar item sem ID');
+      return;
+    }
     setResults(prev => prev.map(item => 
       item.id === id ? { ...item, ...changes } : item
     ));

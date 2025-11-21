@@ -6,6 +6,55 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Rate limiter simples
+class RateLimiter {
+  private queue: Array<() => Promise<void>> = [];
+  private running = 0;
+  private maxConcurrent: number;
+  private minDelay: number;
+  private lastRequestTime = 0;
+
+  constructor(maxConcurrent: number, minDelayMs: number) {
+    this.maxConcurrent = maxConcurrent;
+    this.minDelay = minDelayMs;
+  }
+
+  async schedule<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.queue.push(async () => {
+        try {
+          // Garantir delay mínimo entre requisições
+          const now = Date.now();
+          const timeSinceLastRequest = now - this.lastRequestTime;
+          if (timeSinceLastRequest < this.minDelay) {
+            await new Promise(r => setTimeout(r, this.minDelay - timeSinceLastRequest));
+          }
+          
+          this.lastRequestTime = Date.now();
+          const result = await fn();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        } finally {
+          this.running--;
+          this.processQueue();
+        }
+      });
+      this.processQueue();
+    });
+  }
+
+  private processQueue() {
+    while (this.running < this.maxConcurrent && this.queue.length > 0) {
+      const task = this.queue.shift();
+      if (task) {
+        this.running++;
+        task();
+      }
+    }
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -42,64 +91,68 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
+    // Criar rate limiter: 5 requisições paralelas, 200ms de delay mínimo entre elas
+    const rateLimiter = new RateLimiter(5, 200);
     const enrichedData = [];
     
-    for (let i = 0; i < musicsToProcess.length; i++) {
-      const music = musicsToProcess[i];
-      console.log(`Enriching ${i + 1}/${musicsToProcess.length}: ${music.titulo}`);
-      
+    // Processar todas as músicas em paralelo (limitado pelo rate limiter)
+    const enrichmentPromises = musicsToProcess.map(async (music, i) => {
       try {
-        const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista);
-        let validatedData = validateAndNormalizeMusicData({
-          id: music.id,
-          titulo_original: music.titulo,
-          artista: metadata.artista,
-          compositor: metadata.compositor,
-          ano: metadata.ano,
-          observacoes: metadata.observacoes
-        });
-        
-        // Verificar se precisa de pesquisa web (fallback)
-        const needsWebResearch = 
-          validatedData.status_pesquisa === 'Não Encontrado' ||
-          validatedData.compositor_encontrado === 'Não Identificado' ||
-          validatedData.compositor_encontrado === '' ||
-          validatedData.ano_lancamento === '0000';
-        
-        if (needsWebResearch) {
-          console.log(`Acionando fallback de pesquisa web para: ${music.titulo}`);
-          try {
-            const webData = await searchWithPerplexity(music.titulo, music.artista);
-            
-            // Mesclar dados da web com dados existentes
-            if (webData.compositor && webData.compositor !== 'Não Identificado') {
-              validatedData.compositor_encontrado = webData.compositor;
+        return await rateLimiter.schedule(async () => {
+          console.log(`Enriching ${i + 1}/${musicsToProcess.length}: ${music.titulo}`);
+          
+          const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista);
+          let validatedData = validateAndNormalizeMusicData({
+            id: music.id,
+            titulo_original: music.titulo,
+            artista: metadata.artista,
+            compositor: metadata.compositor,
+            ano: metadata.ano,
+            observacoes: metadata.observacoes
+          });
+          
+          // Verificar se precisa de pesquisa web (fallback)
+          const needsWebResearch = 
+            validatedData.status_pesquisa === 'Não Encontrado' ||
+            validatedData.compositor_encontrado === 'Não Identificado' ||
+            validatedData.compositor_encontrado === '' ||
+            validatedData.ano_lancamento === '0000';
+          
+          if (needsWebResearch) {
+            console.log(`Acionando fallback de pesquisa web para: ${music.titulo}`);
+            try {
+              const webData = await searchWithPerplexity(music.titulo, music.artista);
+              
+              // Mesclar dados da web com dados existentes
+              if (webData.compositor && webData.compositor !== 'Não Identificado') {
+                validatedData.compositor_encontrado = webData.compositor;
+              }
+              if (webData.ano && webData.ano !== '0000') {
+                validatedData.ano_lancamento = webData.ano;
+              }
+              
+              // Atualizar status e observações
+              if (webData.compositor !== 'Não Identificado' || webData.ano !== '0000') {
+                validatedData.status_pesquisa = 'Sucesso (Web)';
+                validatedData.enriched_by_web = true;
+                const webNote = webData.fonte ? ` Fonte: ${webData.fonte}` : '';
+                validatedData.observacoes = validatedData.observacoes 
+                  ? `${validatedData.observacoes}. Dados encontrados via pesquisa web.${webNote}`
+                  : `Dados encontrados via pesquisa web.${webNote}`;
+              }
+              
+              console.log(`Pesquisa web concluída para: ${music.titulo}. Sucesso: ${webData.compositor !== 'Não Identificado' || webData.ano !== '0000'}`);
+            } catch (webError) {
+              console.error(`Falha na pesquisa web para "${music.titulo}":`, webError);
+              // Continua com os dados originais se a pesquisa web falhar
             }
-            if (webData.ano && webData.ano !== '0000') {
-              validatedData.ano_lancamento = webData.ano;
-            }
-            
-            // Atualizar status e observações
-            if (webData.compositor !== 'Não Identificado' || webData.ano !== '0000') {
-              validatedData.status_pesquisa = 'Sucesso (Web)';
-              validatedData.enriched_by_web = true;
-              const webNote = webData.fonte ? ` Fonte: ${webData.fonte}` : '';
-              validatedData.observacoes = validatedData.observacoes 
-                ? `${validatedData.observacoes}. Dados encontrados via pesquisa web.${webNote}`
-                : `Dados encontrados via pesquisa web.${webNote}`;
-            }
-            
-            console.log(`Pesquisa web concluída para: ${music.titulo}. Sucesso: ${webData.compositor !== 'Não Identificado' || webData.ano !== '0000'}`);
-          } catch (webError) {
-            console.error(`Falha na pesquisa web para "${music.titulo}":`, webError);
-            // Continua com os dados originais se a pesquisa web falhar
           }
-        }
-        
-        enrichedData.push(validatedData);
+          
+          return validatedData;
+        });
       } catch (error) {
         console.error(`Error enriching title "${music.titulo}":`, error);
-        enrichedData.push({
+        return {
           id: music.id,
           titulo_original: music.titulo,
           artista_encontrado: 'Não Identificado',
@@ -107,14 +160,13 @@ serve(async (req) => {
           ano_lancamento: '0000',
           observacoes: `Erro na busca: ${error instanceof Error ? error.message : 'Desconhecido'}`,
           status_pesquisa: 'Falha'
-        });
+        };
       }
-      
-      // Add delay between requests to avoid rate limiting
-      if (i < musicsToProcess.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 800)); // Reduzido de 1500ms para 800ms
-      }
-    }
+    });
+
+    // Aguardar conclusão de todas as promessas
+    const results = await Promise.all(enrichmentPromises);
+    enrichedData.push(...results);
 
     return new Response(
       JSON.stringify({ 
