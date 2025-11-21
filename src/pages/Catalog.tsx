@@ -641,6 +641,14 @@ export default function Catalog() {
                       </a>
                     </div>
                   )}
+                  
+                  {selectedArtist.biography_source === 'web' && (
+                    <div className="pt-2 border-t border-border/50">
+                      <p className="text-xs text-muted-foreground italic">
+                        Biografia obtida através de pesquisa web atualizada
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground italic">
