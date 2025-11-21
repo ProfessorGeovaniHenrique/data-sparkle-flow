@@ -39,18 +39,28 @@ serve(async (req) => {
       biographySource = 'wikipedia';
       console.log(`✅ Wikipedia biography found for ${artistName}`);
     } else {
-      // Step 2: Fallback to AI with defensive prompt
-      console.log(`Wikipedia not found, falling back to AI for ${artistName}`);
-      const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+      // Step 2: Try Perplexity Web Search
+      console.log(`Wikipedia not found, trying Perplexity web search for ${artistName}`);
+      const perplexityBio = await fetchPerplexityBiography(artistName);
       
-      if (!LOVABLE_API_KEY) {
-        throw new Error('LOVABLE_API_KEY is not configured');
-      }
+      if (perplexityBio && perplexityBio !== 'Informações não encontradas') {
+        biography = `${perplexityBio}\n\n(Fonte: Pesquisa Web)`;
+        biographySource = 'web';
+        console.log(`✅ Perplexity biography found for ${artistName}`);
+      } else {
+        // Step 3: Final fallback to AI with defensive prompt
+        console.log(`Web search unsuccessful, falling back to AI for ${artistName}`);
+        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+        
+        if (!LOVABLE_API_KEY) {
+          throw new Error('LOVABLE_API_KEY is not configured');
+        }
 
-      const aiBio = await fetchAIBiography(artistName, LOVABLE_API_KEY);
-      biography = aiBio;
-      biographySource = 'ai';
-      console.log(`AI biography generated for ${artistName}`);
+        const aiBio = await fetchAIBiography(artistName, LOVABLE_API_KEY);
+        biography = aiBio;
+        biographySource = 'ai';
+        console.log(`AI biography generated for ${artistName}`);
+      }
     }
 
     // Update artist record in database
@@ -141,7 +151,97 @@ async function fetchWikipediaBio(artistName: string): Promise<string | null> {
 }
 
 /**
- * Fallback: Use AI to generate biography with strict anti-hallucination prompt
+ * Intermediate Fallback: Use Perplexity to search the web for artist information
+ */
+async function fetchPerplexityBiography(artistName: string): Promise<string | null> {
+  const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY');
+  
+  if (!PERPLEXITY_API_KEY) {
+    console.warn('PERPLEXITY_API_KEY not configured, skipping web search');
+    return null;
+  }
+
+  try {
+    const systemPrompt = `Você é um jornalista musical especializado em música brasileira. Pesquise na web sobre o artista/banda indicado e escreva uma biografia curta e objetiva (máximo 2-3 parágrafos).
+
+FOCO OBRIGATÓRIO:
+- Gênero musical principal
+- Origem (cidade/estado, se disponível)
+- Principais trabalhos, álbuns ou músicas conhecidas
+- Período de atividade ou carreira
+
+REGRAS CRÍTICAS:
+- Use APENAS informações encontradas na web atual
+- Se não encontrar NADA confiável sobre o artista, responda APENAS: "Informações não encontradas"
+- NÃO invente fatos, datas ou trabalhos
+- Seja conciso e factual
+- Escreva em Português do Brasil`;
+
+    const userPrompt = `Escreva uma biografia para o artista musical: ${artistName}`;
+
+    console.log(`Calling Perplexity API for: ${artistName}`);
+    
+    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-sonar-small-128k-online',
+        messages: [
+          {
+            role: 'system',
+            content: systemPrompt
+          },
+          {
+            role: 'user',
+            content: userPrompt
+          }
+        ],
+        temperature: 0.2,
+        top_p: 0.9,
+        max_tokens: 800,
+        return_images: false,
+        return_related_questions: false,
+        search_recency_filter: 'year'
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Perplexity API error:', response.status, errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    const biography = data.choices?.[0]?.message?.content;
+    
+    if (!biography) {
+      console.warn('No content returned from Perplexity');
+      return null;
+    }
+
+    const cleanBio = biography.trim();
+    
+    // Check if Perplexity couldn't find information
+    if (cleanBio.toLowerCase().includes('informações não encontradas') || 
+        cleanBio.length < 50) {
+      console.log('Perplexity could not find sufficient information');
+      return null;
+    }
+
+    console.log(`✅ Perplexity returned biography (${cleanBio.length} chars)`);
+    return cleanBio;
+
+  } catch (error) {
+    console.error('Error calling Perplexity:', error);
+    return null;
+  }
+}
+
+/**
+ * Final Fallback: Use AI to generate biography with strict anti-hallucination prompt
  */
 async function fetchAIBiography(artistName: string, apiKey: string): Promise<string> {
   const prompt = `Você é uma enciclopédia factual especializada em música brasileira.
