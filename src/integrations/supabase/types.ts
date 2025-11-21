@@ -134,6 +134,45 @@ export type Database = {
         }
         Relationships: []
       }
+      youtube_cache: {
+        Row: {
+          channel_title: string
+          created_at: string | null
+          description: string | null
+          hits_count: number | null
+          id: string
+          publish_date: string
+          search_query: string
+          updated_at: string | null
+          video_id: string
+          video_title: string
+        }
+        Insert: {
+          channel_title: string
+          created_at?: string | null
+          description?: string | null
+          hits_count?: number | null
+          id?: string
+          publish_date: string
+          search_query: string
+          updated_at?: string | null
+          video_id: string
+          video_title: string
+        }
+        Update: {
+          channel_title?: string
+          created_at?: string | null
+          description?: string | null
+          hits_count?: number | null
+          id?: string
+          publish_date?: string
+          search_query?: string
+          updated_at?: string | null
+          video_id?: string
+          video_title?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
