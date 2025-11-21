@@ -1,5 +1,64 @@
 import * as XLSX from 'xlsx';
 
+// Função para parsing usando Web Worker (não trava a UI)
+export function parseExcelWithWorker(
+  file: File, 
+  onProgress?: (message: string, percentage: number) => void
+): Promise<RawParseResult> {
+  return new Promise((resolve, reject) => {
+    // Criar worker
+    const worker = new Worker(
+      new URL('../workers/excelParser.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+
+    // Ler arquivo como ArrayBuffer
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      if (!e.target?.result) {
+        reject(new Error('Falha ao ler arquivo'));
+        return;
+      }
+
+      // Enviar para worker
+      worker.postMessage({
+        type: 'PARSE_EXCEL',
+        data: e.target.result,
+        filename: file.name
+      });
+    };
+
+    reader.onerror = () => {
+      reject(new Error('Erro ao ler arquivo'));
+      worker.terminate();
+    };
+
+    // Receber mensagens do worker
+    worker.onmessage = (e) => {
+      const response = e.data;
+
+      if (response.type === 'SUCCESS') {
+        resolve(response.result);
+        worker.terminate();
+      } else if (response.type === 'ERROR') {
+        reject(new Error(response.error));
+        worker.terminate();
+      } else if (response.type === 'PROGRESS' && onProgress) {
+        onProgress(response.message, response.percentage);
+      }
+    };
+
+    worker.onerror = (error) => {
+      reject(new Error(`Worker error: ${error.message}`));
+      worker.terminate();
+    };
+
+    // Iniciar leitura
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export interface ParsedMusic {
   titulo: string;
   artista?: string;

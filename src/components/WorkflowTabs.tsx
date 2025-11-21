@@ -12,6 +12,7 @@ import { EnrichedMusicData } from '@/lib/batchProcessor';
 import { useProcessing } from '@/contexts/ProcessingContext';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { VirtualizedInboxTable } from './VirtualizedInboxTable';
 
 interface WorkflowTabsProps {
   queuedItems: { id: string; titulo: string; artista: string; fonte: string }[];
@@ -52,7 +53,7 @@ export const WorkflowTabs = ({ queuedItems, pendingItems, approvedItems, isProce
       </TabsContent>
 
       <TabsContent value="inbox">
-        <InboxTable items={pendingItems} />
+        <VirtualizedInboxTable items={pendingItems} />
       </TabsContent>
 
       <TabsContent value="done">
