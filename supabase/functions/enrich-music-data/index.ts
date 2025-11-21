@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -62,12 +63,73 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
+    const mode = body.mode || 'legacy';
     
-    // Suporta tanto formato antigo { titles: string[] } quanto novo { musics: [{id, titulo, artista}] }
+    // Suporta formato legado e novo modo database
     let musicsToProcess: Array<{ id?: string; titulo: string; artista?: string }> = [];
+    let artistName: string | undefined;
+    let supabaseClient: any;
     
-    if (body.titles && Array.isArray(body.titles)) {
-      // Formato antigo: apenas lista de títulos
+    // Modo Database: busca músicas pendentes do Supabase
+    if (mode === 'database' && body.artistId) {
+      console.log(`[Database Mode] Enriching songs for artist ID: ${body.artistId}`);
+      
+      // Criar cliente Supabase
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      supabaseClient = createClient(supabaseUrl, supabaseKey);
+      
+      // Buscar nome do artista
+      const { data: artistData, error: artistError } = await supabaseClient
+        .from('artists')
+        .select('name')
+        .eq('id', body.artistId)
+        .single();
+      
+      if (artistError) {
+        throw new Error(`Artista não encontrado: ${artistError.message}`);
+      }
+      
+      artistName = artistData.name;
+      console.log(`[Database Mode] Artist name: ${artistName}`);
+      
+      // Buscar até 20 músicas pendentes
+      const { data: songsData, error: songsError } = await supabaseClient
+        .from('songs')
+        .select('id, title')
+        .eq('artist_id', body.artistId)
+        .eq('status', 'pending')
+        .limit(20);
+      
+      if (songsError) {
+        throw new Error(`Erro ao buscar músicas: ${songsError.message}`);
+      }
+      
+      if (!songsData || songsData.length === 0) {
+        return new Response(
+          JSON.stringify({ 
+            success: true,
+            message: 'Nenhuma música pendente encontrada',
+            processed: 0,
+            successCount: 0
+          }),
+          { 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 200 
+          }
+        );
+      }
+      
+      musicsToProcess = songsData.map((song: any) => ({
+        id: song.id,
+        titulo: song.title,
+        artista: artistName
+      }));
+      
+      console.log(`[Database Mode] Found ${musicsToProcess.length} pending songs`);
+      
+    } else if (body.titles && Array.isArray(body.titles)) {
+      // Formato legado: apenas lista de títulos
       musicsToProcess = body.titles.map((titulo: string, index: number) => ({
         id: `legacy-${index}`,
         titulo,
@@ -81,7 +143,7 @@ serve(async (req) => {
         artista: m.artista_contexto || m.artista
       }));
     } else {
-      throw new Error('Formato de payload inválido. Esperado { titles: string[] } ou { musics: [{id, titulo, artista}] }');
+      throw new Error('Formato de payload inválido. Esperado { mode: "database", artistId: "..." } ou { titles: string[] } ou { musics: [{id, titulo, artista}] }');
     }
     
     console.log(`Starting enrichment for ${musicsToProcess.length} items`);
@@ -94,6 +156,8 @@ serve(async (req) => {
     // Criar rate limiter: 5 requisições paralelas, 200ms de delay mínimo entre elas
     const rateLimiter = new RateLimiter(5, 200);
     const enrichedData = [];
+    let successCount = 0;
+    let failureCount = 0;
     
     // Processar todas as músicas em paralelo (limitado pelo rate limiter)
     const enrichmentPromises = musicsToProcess.map(async (music, i) => {
@@ -101,7 +165,7 @@ serve(async (req) => {
         return await rateLimiter.schedule(async () => {
           console.log(`Enriching ${i + 1}/${musicsToProcess.length}: ${music.titulo}`);
           
-          const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista);
+          const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista, artistName);
           let validatedData = validateAndNormalizeMusicData({
             id: music.id,
             titulo_original: music.titulo,
@@ -148,10 +212,42 @@ serve(async (req) => {
             }
           }
           
+          // MODO DATABASE: Atualizar diretamente no banco
+          if (mode === 'database' && supabaseClient && music.id) {
+            console.log(`[Database Mode] Updating song ${music.id} in database`);
+            
+            const enrichmentSource = validatedData.enriched_by_web ? 'web' : 'ai';
+            
+            const { error: updateError } = await supabaseClient
+              .from('songs')
+              .update({
+                composer: validatedData.compositor_encontrado !== 'Não Identificado' 
+                  ? validatedData.compositor_encontrado 
+                  : null,
+                release_year: validatedData.ano_lancamento !== '0000' 
+                  ? validatedData.ano_lancamento 
+                  : null,
+                status: 'enriched',
+                enrichment_source: enrichmentSource,
+                confidence_score: validatedData.status_pesquisa === 'Sucesso' ? 95 : 
+                                 validatedData.status_pesquisa === 'Parcial' ? 60 : 30
+              })
+              .eq('id', music.id);
+            
+            if (updateError) {
+              console.error(`Error updating song ${music.id}:`, updateError);
+              failureCount++;
+            } else {
+              console.log(`[Database Mode] Song ${music.id} updated successfully`);
+              successCount++;
+            }
+          }
+          
           return validatedData;
         });
       } catch (error) {
         console.error(`Error enriching title "${music.titulo}":`, error);
+        failureCount++;
         return {
           id: music.id,
           titulo_original: music.titulo,
@@ -168,6 +264,24 @@ serve(async (req) => {
     const results = await Promise.all(enrichmentPromises);
     enrichedData.push(...results);
 
+    // Resposta diferente para modo database
+    if (mode === 'database') {
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: 'Enriquecimento concluído',
+          processed: musicsToProcess.length,
+          successCount: successCount,
+          failed: failureCount
+        }),
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: 200 
+        }
+      );
+    }
+    
+    // Resposta legado para outros modos
     return new Response(
       JSON.stringify({ 
         success: true,
@@ -213,8 +327,11 @@ serve(async (req) => {
   }
 });
 
-async function enrichSingleTitle(titulo: string, apiKey: string, artistaContexto?: string) {
-  const contextoArtista = artistaContexto ? `\nArtista de Contexto (se disponível): ${artistaContexto}` : '';
+async function enrichSingleTitle(titulo: string, apiKey: string, artistaContexto?: string, artistaEspecifico?: string) {
+  // Se artistaEspecifico foi passado (modo database), use contexto melhorado
+  const contextoArtista = artistaEspecifico 
+    ? `\n\n**CONTEXTO IMPORTANTE**: Você está analisando músicas do artista "${artistaEspecifico}". Todas as respostas devem considerar este contexto específico.`
+    : (artistaContexto ? `\nArtista de Contexto (se disponível): ${artistaContexto}` : '');
   
   const prompt = `Você é um especialista em musicologia brasileira e catalogação de dados fonográficos, com foco profundo em gêneros nordestinos como Forró, Piseiro, Baião, Xote e Arrocha. Sua tarefa é atuar como um enriquecedor de metadados musicais de alta precisão.
 
