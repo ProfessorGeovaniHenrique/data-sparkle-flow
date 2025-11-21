@@ -115,10 +115,54 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
     multiple: true
   });
 
-  const handleConfirm = () => {
-    onFilesSelect(rawFiles, parseResults);
-    setParseResults([]);
-    setRawFiles([]);
+  const handleImportToCatalog = async () => {
+    if (parseResults.length === 0) return;
+    
+    try {
+      const { ingestExcelData } = await import('@/services/ingestionService');
+      const allMusicData = parseResults.flatMap(r => r.extractedData);
+      
+      toast.info('Importando para o catálogo...');
+      addLog('Iniciando importação para o Supabase...');
+      
+      const result = await ingestExcelData(
+        allMusicData,
+        parseResults[0].filename,
+        (progress) => {
+          const percent = Math.round((progress.current / progress.total) * 100);
+          setParsingProgress(percent);
+          addLog(`[${progress.phase}] ${progress.message}`);
+        }
+      );
+      
+      setParsingProgress(0);
+      addLog(`✓ Importação concluída!`);
+      addLog(`  • Artistas criados: ${result.artistsCreated}`);
+      addLog(`  • Artistas existentes: ${result.artistsExisting}`);
+      addLog(`  • Músicas inseridas: ${result.songsInserted}`);
+      addLog(`  • Músicas duplicadas (ignoradas): ${result.songsDuplicated}`);
+      
+      if (result.errors.length > 0) {
+        addLog(`⚠️ Erros encontrados: ${result.errors.length}`);
+        result.errors.forEach(err => addLog(`  - ${err}`));
+      }
+      
+      toast.success(`Importação concluída! ${result.songsInserted} músicas adicionadas ao catálogo.`);
+      
+      // Limpar estado e redirecionar para catálogo
+      setParseResults([]);
+      setRawFiles([]);
+      
+      // Redirecionar após 2 segundos
+      setTimeout(() => {
+        window.location.href = '/catalog';
+      }, 2000);
+      
+    } catch (error: any) {
+      console.error('Erro na importação:', error);
+      addLog(`❌ Erro na importação: ${error.message}`);
+      toast.error(`Falha na importação: ${error.message}`);
+    }
   };
 
   const handleCancel = () => {
@@ -417,12 +461,25 @@ export const FileUpload = ({ onFilesSelect, isProcessing }: FileUploadProps) => 
           </ScrollArea>
         </div>
 
+        {parsingProgress > 0 && (
+          <div className="mb-4">
+            <Progress value={parsingProgress} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-1 text-center">
+              Importando... {parsingProgress}%
+            </p>
+          </div>
+        )}
+
         <div className="flex gap-3 justify-end">
-          <Button variant="outline" onClick={handleCancel} disabled={isProcessing}>
+          <Button variant="outline" onClick={handleCancel} disabled={isProcessing || parsingProgress > 0}>
             Cancelar
           </Button>
-          <Button onClick={handleConfirm} disabled={isProcessing}>
-            Confirmar e Processar {totalMusicas.toLocaleString()} Músicas
+          <Button 
+            onClick={handleImportToCatalog} 
+            disabled={isProcessing || parsingProgress > 0}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            Importar para Catálogo ({totalMusicas.toLocaleString()} músicas)
           </Button>
         </div>
       </div>
