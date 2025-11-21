@@ -119,13 +119,54 @@ export const ProcessingDashboard = () => {
   };
 
   if (results.length === 0) {
+    const hasProgress = progress.total > 0 && progress.current === 0;
+    
+    if (hasProgress) {
+      return (
+        <div className="space-y-6 mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 animate-pulse" />
+                Preparando Processamento
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Total de músicas na fila:</span>
+                  <span className="font-semibold">{progress.total}</span>
+                </div>
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                </div>
+                <p className="text-center text-sm text-muted-foreground">
+                  Enviando lote inicial para processamento...
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     return (
       <Card className="mt-6">
         <CardContent className="text-center py-12">
-          <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-50 text-muted-foreground" />
-          <p className="text-muted-foreground text-lg">
-            Aguardando início do processamento...
+          <BarChart3 className="w-16 h-16 mx-auto mb-4 opacity-50 text-muted-foreground animate-pulse" />
+          <p className="text-muted-foreground text-lg font-semibold">
+            {status === 'enriching' ? 'Iniciando processamento...' : 'Aguardando início do processamento...'}
           </p>
+          {status === 'enriching' && (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm text-muted-foreground">
+                🔄 Conectando à API de enriquecimento...
+              </p>
+              <p className="text-xs text-muted-foreground/70">
+                Os primeiros resultados aparecerão em instantes
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
