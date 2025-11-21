@@ -38,6 +38,12 @@ export function SongCard({
   const [isLyricsOpen, setIsLyricsOpen] = useState(false);
   const statusInfo = statusConfig[status as keyof typeof statusConfig] || statusConfig.pending;
   const isEnriched = status === 'enriched' || status === 'approved';
+  
+  // Extrair apenas a primeira linha como título (dados têm letra no campo title)
+  const displayTitle = title?.split('\n')[0]?.trim() || 'Título não identificado';
+  
+  console.log('SongCard - Title recebido:', title?.substring(0, 100));
+  console.log('SongCard - Display title:', displayTitle);
 
   return (
     <Card 
@@ -50,8 +56,8 @@ export function SongCard({
         {/* Header: Título e Badges */}
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-3">
-            <h3 className="text-lg font-bold flex-1 leading-tight">
-              {title}
+            <h3 className="text-2xl font-bold flex-1 leading-tight text-foreground">
+              {displayTitle}
             </h3>
             <div className="flex gap-2 shrink-0">
               <Badge className={statusInfo.color}>
