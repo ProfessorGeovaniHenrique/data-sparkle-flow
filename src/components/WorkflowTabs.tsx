@@ -129,7 +129,11 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [selectedRowIndex, setSelectedRowIndex] = useState<number>(0);
+  const [isKeyboardMode, setIsKeyboardMode] = useState(false);
+  const [feedbackAnimations, setFeedbackAnimations] = useState<Record<string, boolean>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   const filteredData = useMemo(() => {
     if (!searchTerm.trim()) return items;
@@ -155,8 +159,64 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
     }
   }, [editingCell]);
 
+  const showApprovalFeedback = (id: string) => {
+    setFeedbackAnimations(prev => ({ ...prev, [id]: true }));
+    setTimeout(() => {
+      setFeedbackAnimations(prev => {
+        const newState = { ...prev };
+        delete newState[id];
+        return newState;
+      });
+    }, 1000);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingCell) return;
+
+      if (['ArrowUp', 'ArrowDown', 'a', 'A', 'e', 'E', 'Enter'].includes(e.key)) {
+        setIsKeyboardMode(true);
+      }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedRowIndex(prev => Math.min(prev + 1, paginatedItems.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedRowIndex(prev => Math.max(prev - 1, 0));
+      } else if (e.key === 'a' || e.key === 'A') {
+        e.preventDefault();
+        const item = paginatedItems[selectedRowIndex];
+        if (item?.id) {
+          showApprovalFeedback(item.id);
+          approveItem(item.id);
+        }
+      } else if (e.key === 'e' || e.key === 'E' || e.key === 'Enter') {
+        e.preventDefault();
+        const item = paginatedItems[selectedRowIndex];
+        if (item) {
+          const rowId = item.id || `row-${selectedRowIndex}`;
+          startEditing(rowId, 'artista_encontrado', item.artista_encontrado);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingCell, paginatedItems, selectedRowIndex, approveItem]);
+
+  useEffect(() => {
+    if (isKeyboardMode && tableContainerRef.current) {
+      const selectedRow = tableContainerRef.current.querySelector(`[data-row-index="${selectedRowIndex}"]`);
+      if (selectedRow) {
+        selectedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [selectedRowIndex, isKeyboardMode]);
+
   const handleApproveSelected = () => {
     if (selectedIds.length > 0) {
+      selectedIds.forEach(id => showApprovalFeedback(id));
       approveMultiple(selectedIds);
       setSelectedIds([]);
     }
@@ -165,6 +225,11 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
   const handleApproveAll = () => {
     const ids = paginatedItems.map(i => i.id || '').filter(id => id);
     approveMultiple(ids);
+  };
+
+  const handleRowClick = (index: number) => {
+    setSelectedRowIndex(index);
+    setIsKeyboardMode(false);
   };
 
   const toggleSelection = (id: string) => {
@@ -236,7 +301,14 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <CardTitle className="text-2xl">Revisão de Metadados</CardTitle>
+            <CardTitle className="text-2xl flex items-center gap-2">
+              Revisão de Metadados
+              {isKeyboardMode && (
+                <Badge variant="outline" className="animate-pulse text-xs">
+                  ⌨️ Modo Teclado
+                </Badge>
+              )}
+            </CardTitle>
             <CardDescription className="mt-1">
               {items.length} músicas aguardando validação
             </CardDescription>
@@ -268,9 +340,21 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
             className="pl-10"
           />
         </div>
+        <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
+          <p className="text-sm font-medium mb-2 flex items-center gap-2">
+            <kbd className="px-2 py-1 text-xs bg-background rounded border">⌨️</kbd>
+            Atalhos de Teclado
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
+            <div><kbd className="px-1.5 py-0.5 bg-background rounded">↑↓</kbd> Navegar</div>
+            <div><kbd className="px-1.5 py-0.5 bg-background rounded">A</kbd> Aprovar</div>
+            <div><kbd className="px-1.5 py-0.5 bg-background rounded">E</kbd> ou <kbd className="px-1.5 py-0.5 bg-background rounded">Enter</kbd> Editar</div>
+            <div><kbd className="px-1.5 py-0.5 bg-background rounded">Esc</kbd> Cancelar</div>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[600px] rounded-md border">
+        <ScrollArea className="h-[600px] rounded-md border" ref={tableContainerRef}>
           <Table>
             <TableHeader className="sticky top-0 bg-background z-10">
               <TableRow>
@@ -299,7 +383,16 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
                 paginatedItems.map((item, index) => {
                   const rowId = item.id || `row-${index}`;
                   return (
-                    <TableRow key={rowId} className={getRowHighlight(item)}>
+                    <TableRow 
+                      key={rowId} 
+                      data-row-index={index}
+                      className={cn(
+                        getRowHighlight(item),
+                        isKeyboardMode && selectedRowIndex === index && "ring-2 ring-primary ring-offset-2",
+                        feedbackAnimations[rowId] && "animate-pulse bg-green-100 dark:bg-green-950/30 transition-colors duration-300"
+                      )}
+                      onClick={() => handleRowClick(index)}
+                    >
                       <TableCell>
                         <Checkbox
                           checked={selectedIds.includes(rowId)}
@@ -436,8 +529,11 @@ const InboxTable = ({ items }: { items: EnrichedMusicData[] }) => {
                       <TableCell>
                         <Button
                           size="sm"
-                          onClick={() => approveItem(rowId)}
-                          className="gap-1"
+                          onClick={() => {
+                            showApprovalFeedback(rowId);
+                            approveItem(rowId);
+                          }}
+                          className="gap-1 transition-all hover:scale-105 active:scale-95"
                         >
                           <CheckCircle2 className="w-4 h-4" />
                           Aprovar

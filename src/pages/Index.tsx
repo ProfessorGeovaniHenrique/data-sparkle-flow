@@ -4,10 +4,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { FileUpload } from '@/components/FileUpload';
 import { ProcessingControl } from '@/components/ProcessingControl';
 import { ProcessingDashboard } from '@/components/ProcessingDashboard';
+import { PerformanceDashboard } from '@/components/PerformanceDashboard';
 import { WorkflowTabs } from '@/components/WorkflowTabs';
 import { ErrorLog } from '@/components/ErrorLog';
 import { Download, Music, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -223,7 +225,20 @@ const IndexContent = () => {
           <ErrorLog onRetry={handleRetryFailed} />
         )}
 
-        {(enrichedData.length > 0 || isProcessing) && <ProcessingDashboard />}
+        {(enrichedData.length > 0 || isProcessing) && (
+          <Tabs defaultValue="realtime" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="realtime">Dashboard em Tempo Real</TabsTrigger>
+              <TabsTrigger value="performance">Performance</TabsTrigger>
+            </TabsList>
+            <TabsContent value="realtime">
+              <ProcessingDashboard />
+            </TabsContent>
+            <TabsContent value="performance">
+              <PerformanceDashboard />
+            </TabsContent>
+          </Tabs>
+        )}
 
         {enrichedData.length > 0 && (
           <WorkflowTabs 
