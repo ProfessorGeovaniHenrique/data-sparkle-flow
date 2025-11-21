@@ -2,16 +2,15 @@ import { useEffect, useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Music, Users, Loader2, Search, Upload } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import { ArtistCard } from '@/components/ArtistCard';
+import { SongCard } from '@/components/SongCard';
 
 interface Artist {
   id: string;
@@ -30,6 +29,7 @@ interface Song {
   enrichment_source: string | null;
   confidence_score: number;
   created_at: string;
+  updated_at: string;
 }
 
 const statusConfig = {
@@ -45,6 +45,7 @@ export default function Catalog() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'pending' | 'recent'>('name');
   const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const [recentlyEnrichedIds, setRecentlyEnrichedIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   // Query para artistas
@@ -126,6 +127,20 @@ export default function Catalog() {
         },
         (payload) => {
           console.log('[Realtime] Song updated:', payload.new);
+          
+          // Marcar como recém-enriquecido se status mudou para enriched
+          if (payload.new.status === 'enriched' && payload.old?.status === 'pending') {
+            setRecentlyEnrichedIds(prev => new Set(prev).add(payload.new.id));
+            
+            // Remover destaque após 5 segundos
+            setTimeout(() => {
+              setRecentlyEnrichedIds(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(payload.new.id);
+                return newSet;
+              });
+            }, 5000);
+          }
           
           // Atualizar cache local imediatamente
           queryClient.setQueryData(['songs', selectedArtistId], (oldData: Song[] | undefined) => {
@@ -396,63 +411,19 @@ export default function Catalog() {
               </div>
             ) : songs && songs.length > 0 ? (
               <div className="space-y-3 pr-4">
-                {songs.map((song) => {
-                  const statusInfo = statusConfig[song.status as keyof typeof statusConfig] || statusConfig.pending;
-                  
-                  return (
-                    <Card key={song.id} className="p-4">
-                      <div className="space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <h3 className="font-semibold text-base flex-1">{song.title}</h3>
-                          <Badge className={statusInfo.color}>
-                            {statusInfo.label}
-                          </Badge>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          {song.composer && (
-                            <div>
-                              <span className="text-muted-foreground">Compositor:</span>
-                              <p className="font-medium">{song.composer}</p>
-                            </div>
-                          )}
-                          {song.release_year && (
-                            <div>
-                              <span className="text-muted-foreground">Ano:</span>
-                              <p className="font-medium">{song.release_year}</p>
-                            </div>
-                          )}
-                          {song.enrichment_source && (
-                            <div>
-                              <span className="text-muted-foreground">Fonte:</span>
-                              <p className="font-medium">{song.enrichment_source}</p>
-                            </div>
-                          )}
-                          {song.confidence_score > 0 && (
-                            <div>
-                              <span className="text-muted-foreground">Confiança:</span>
-                              <p className="font-medium">{song.confidence_score}%</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {song.lyrics && (
-                          <>
-                            <Separator />
-                            <details className="text-sm">
-                              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                                Ver letra
-                              </summary>
-                              <pre className="mt-2 whitespace-pre-wrap text-xs bg-muted/50 p-3 rounded max-h-40 overflow-y-auto">
-                                {song.lyrics}
-                              </pre>
-                            </details>
-                          </>
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
+                {songs.map((song) => (
+                  <SongCard
+                    key={song.id}
+                    title={song.title}
+                    composer={song.composer}
+                    releaseYear={song.release_year}
+                    lyrics={song.lyrics}
+                    status={song.status}
+                    enrichmentSource={song.enrichment_source}
+                    confidenceScore={song.confidence_score}
+                    isRecentlyEnriched={recentlyEnrichedIds.has(song.id)}
+                  />
+                ))}
               </div>
             ) : (
               <div className="flex items-center justify-center py-12">
