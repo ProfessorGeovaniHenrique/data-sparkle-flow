@@ -165,7 +165,25 @@ serve(async (req) => {
         return await rateLimiter.schedule(async () => {
           console.log(`Enriching ${i + 1}/${musicsToProcess.length}: ${music.titulo}`);
           
-          const metadata = await enrichSingleTitle(music.titulo, LOVABLE_API_KEY, music.artista, artistName);
+          // ============ BUSCAR NO YOUTUBE PRIMEIRO (RAG) ============
+          let youtubeData: YouTubeSearchResult | null = null;
+          try {
+            youtubeData = await searchYouTube(music.titulo, music.artista);
+          } catch (ytError) {
+            console.error(`[YouTube] Erro ao buscar "${music.titulo}":`, ytError);
+            // Continua sem YouTube
+          }
+          // ===========================================================
+          
+          // Passar contexto YouTube para a IA
+          const metadata = await enrichSingleTitle(
+            music.titulo, 
+            LOVABLE_API_KEY, 
+            music.artista, 
+            artistName,
+            youtubeData || undefined
+          );
+          
           let validatedData = validateAndNormalizeMusicData({
             id: music.id,
             titulo_original: music.titulo,
@@ -174,6 +192,14 @@ serve(async (req) => {
             ano: metadata.ano,
             observacoes: metadata.observacoes
           });
+          
+          // Se YouTube foi usado, adicionar nota
+          if (youtubeData) {
+            const ytNote = `Contexto do YouTube: "${youtubeData.videoTitle}" (${youtubeData.channelTitle})`;
+            validatedData.observacoes = validatedData.observacoes 
+              ? `${validatedData.observacoes}. ${ytNote}`
+              : ytNote;
+          }
           
           // Verificar se precisa de pesquisa web (fallback)
           const needsWebResearch = 
@@ -327,15 +353,48 @@ serve(async (req) => {
   }
 });
 
-async function enrichSingleTitle(titulo: string, apiKey: string, artistaContexto?: string, artistaEspecifico?: string) {
+async function enrichSingleTitle(
+  titulo: string, 
+  apiKey: string, 
+  artistaContexto?: string, 
+  artistaEspecifico?: string,
+  youtubeContext?: YouTubeSearchResult
+) {
   // Se artistaEspecifico foi passado (modo database), use contexto melhorado
   const contextoArtista = artistaEspecifico 
     ? `\n\n**CONTEXTO IMPORTANTE**: Você está analisando músicas do artista "${artistaEspecifico}". Todas as respostas devem considerar este contexto específico.`
     : (artistaContexto ? `\nArtista de Contexto (se disponível): ${artistaContexto}` : '');
   
+  // Contexto do YouTube (se disponível)
+  let contextoYouTube = '';
+  if (youtubeContext) {
+    const publishYear = new Date(youtubeContext.publishDate).getFullYear();
+    
+    contextoYouTube = `
+
+**🎬 CONTEXTO FACTUAL DO YOUTUBE (DADOS OFICIAIS):**
+- Título do Vídeo: "${youtubeContext.videoTitle}"
+- Canal: ${youtubeContext.channelTitle}
+- Data de Publicação: ${youtubeContext.publishDate} (ANO: ${publishYear})
+- Link: https://youtube.com/watch?v=${youtubeContext.videoId}
+
+**Descrição do Vídeo (BUSQUE CRÉDITOS AQUI):**
+${youtubeContext.description.substring(0, 800)}${youtubeContext.description.length > 800 ? '...' : ''}
+
+**INSTRUÇÕES ESPECIAIS:**
+• Use o ANO da data de publicação (${publishYear}) como forte referência para o campo "ano"
+• Procure por padrões de créditos na descrição:
+  - "Provided to YouTube by [distribuidor]"
+  - "Composer:" ou "Compositor:"
+  - "℗ [ano] [gravadora]"
+  - "Written by:" ou "Letra:"
+• DÊ PRIORIDADE aos dados encontrados na descrição do YouTube se parecerem oficiais
+`;
+  }
+  
   const prompt = `Você é um especialista em musicologia brasileira e catalogação de dados fonográficos, com foco profundo em gêneros nordestinos como Forró, Piseiro, Baião, Xote e Arrocha. Sua tarefa é atuar como um enriquecedor de metadados musicais de alta precisão.
 
-Música: "${titulo}"${contextoArtista}
+Música: "${titulo}"${contextoArtista}${contextoYouTube}
 
 Para esta música, você deve realizar uma pesquisa mental em sua base de conhecimento para encontrar os dados mais precisos e retornar informações padronizadas.
 
@@ -459,6 +518,88 @@ function validateYear(year: any): string {
   
   return '0000';
 }
+
+// ============= YOUTUBE DATA API INTEGRATION =============
+interface YouTubeSearchResult {
+  videoTitle: string;
+  channelTitle: string;
+  publishDate: string;
+  description: string;
+  videoId: string;
+}
+
+async function searchYouTube(
+  titulo: string, 
+  artista?: string
+): Promise<YouTubeSearchResult | null> {
+  const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
+  
+  // Fallback silencioso se key não estiver configurada
+  if (!YOUTUBE_API_KEY) {
+    console.warn('⚠️ YOUTUBE_API_KEY não configurada. Pulando busca no YouTube.');
+    return null;
+  }
+
+  // Construir query otimizada para resultados oficiais
+  const artistaInfo = artista ? ` ${artista}` : '';
+  const searchQuery = `${titulo}${artistaInfo} official audio`;
+  
+  console.log(`🔎 [YouTube] Buscando: "${searchQuery}"`);
+
+  try {
+    const url = new URL('https://www.googleapis.com/youtube/v3/search');
+    url.searchParams.append('part', 'snippet');
+    url.searchParams.append('q', searchQuery);
+    url.searchParams.append('type', 'video');
+    url.searchParams.append('maxResults', '1');
+    url.searchParams.append('key', YOUTUBE_API_KEY);
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    // Tratamento especial para quota exceeded
+    if (response.status === 403) {
+      const errorData = await response.json().catch(() => ({}));
+      
+      if (errorData?.error?.errors?.[0]?.reason === 'quotaExceeded') {
+        console.error('❌ [YouTube] Quota diária excedida (10,000 unidades). Continuando sem YouTube...');
+        return null; // Fallback silencioso
+      }
+    }
+
+    if (!response.ok) {
+      console.error(`❌ [YouTube] HTTP ${response.status}: ${await response.text()}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const firstResult = data.items?.[0];
+
+    if (!firstResult) {
+      console.log(`ℹ️ [YouTube] Nenhum resultado encontrado para: "${searchQuery}"`);
+      return null;
+    }
+
+    const snippet = firstResult.snippet;
+    const result: YouTubeSearchResult = {
+      videoTitle: snippet.title,
+      channelTitle: snippet.channelName || snippet.channelTitle,
+      publishDate: snippet.publishedAt, // ISO 8601 format
+      description: snippet.description,
+      videoId: firstResult.id.videoId
+    };
+
+    console.log(`✅ [YouTube] Encontrado: "${result.videoTitle}" (${result.channelTitle})`);
+    return result;
+
+  } catch (error) {
+    console.error('❌ [YouTube] Erro na busca:', error);
+    return null; // Continua sem YouTube
+  }
+}
+// ========================================================
 
 async function searchWithPerplexity(titulo: string, artista?: string): Promise<{ compositor: string; ano: string; fonte?: string }> {
   const PERPLEXITY_API_KEY = Deno.env.get('PERPLEXITY_API_KEY');
